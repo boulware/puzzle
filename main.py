@@ -223,7 +223,15 @@ class Card:
 		self.begin_phase_fns = begin_phase_fns
 		self.attack_phase_fns = attack_phase_fns
 		self.passive_fns = passive_fns
+		self.buffs = []
 
+		self.__generate_hand_surface()
+		self.__refresh_board_surface()
+
+	def __refresh_board_surface(self):
+		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
+
+	def __generate_hand_surface(self):
 		self.hand_surface = pg.Surface(hand_card_size)
 		pg.draw.rect(self.hand_surface, dark_grey, ((0,0), hand_card_size))
 		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
@@ -232,16 +240,18 @@ class Card:
 		cost_surface = card_text_lg.render(str(self.cost), True, grey)
 		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
 
-		# node_size = (90,90)
-		# card_size = (100,160)
-		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
-
 	def clone(self):
 		return Card(name = self.name,
 					cost = self.cost,
 					begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
 					attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
 					passive_fns = copy.deepcopy(self.passive_fns))
+
+	def apply_buffs(self):
+		pass
+
+	def __refresh_buffs(self):
+		pass
 
 	def do_passive(self):
 		for fn in self.passive_fns:
@@ -262,16 +272,51 @@ class Card:
 			screen.blit(self.board_surface, pos)
 
 class CreatureCard(Card):
-	def __init__(self, name, cost, power, toughness, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
+	def __init__(self, name, cost, base_power, base_toughness, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
 		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
-		self.power = power
-		self.toughness = toughness
+		self.base_power = base_power
+		self.base_toughness = base_toughness
+
+		self.__generate_hand_surface()
+		self.__refresh_board_surface()
+
+	def __refresh_board_surface(self):
+		self._Card__refresh_board_surface()
+
+	def __generate_hand_surface(self):
+		self._Card__generate_hand_surface()
+		stats = self.get_stats()
+		stats_surface = card_text_sm.render(str(stats[0]) + '/' + str(stats[1]), True, green)
+		bottomright = self.hand_surface.get_rect().bottomright
+		draw_surface_aligned(	target=self.hand_surface, 
+								source=stats_surface,
+								pos=bottomright,
+								align=('right','down'),
+								offset=(-2,-2))
+
+	def apply_buffs(self, power=0, toughness=0):
+		buff = (power,toughness)
+		if buff != (0,0):
+			self.buffs.append(buff)
+
+		self.__generate_hand_surface()
+		self.__refresh_board_surface()
+
+	def get_stats(self):
+		power = self.base_power
+		toughness = self.base_toughness
+
+		for buff in self.buffs:
+			power += buff[0]
+			toughness += buff[1]
+
+		return (power, toughness)
 
 	def clone(self):
 		return CreatureCard(name = self.name,
 							cost = self.cost,
-							power = self.power,
-							toughness = self.toughness,
+							base_power = self.base_power,
+							base_toughness = self.base_toughness,
 							begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
 							attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
 							passive_fns = copy.deepcopy(self.passive_fns))
@@ -508,6 +553,13 @@ class Board:
 				for cell_coord in cell_coords:
 					self.red_mana[cell_coord] += amount
 
+	def buff_creatures_in_range(self, power, toughness, pos, distance=1):
+		if pos:
+			cell_coords = self.grid.get_cells_by_distance(pos, distance)
+			for cell_coord in cell_coords:
+				if isinstance(self.cards[cell_coord], CreatureCard):
+					self.cards[cell_coord].apply_buffs(power=1,toughness=1)
+
 	def do_passive(self):
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
@@ -537,10 +589,10 @@ class Board:
 					card_pos[0] -= board_card_size[0]//2
 					card.draw(card_pos, 'board')
 
-		# (Old) Drawing the power text number in each cell
-		for i, power in np.ndenumerate(self.red_mana):
-			power_surface = count_font.render(str(power), True, red)
-			self.grid.draw_surface_in_cell(power_surface, i, align=('right', 'down'), offset=(-2,-2))
+		# (Old) Drawing the mana text number in each cell
+		for i, mana in np.ndenumerate(self.red_mana):
+			mana_surface = count_font.render(str(mana), True, red)
+			self.grid.draw_surface_in_cell(mana_surface, i, align=('right', 'down'), offset=(-2,-2))
 
 
 		self.grid.draw(grey)
@@ -555,8 +607,9 @@ def draw_hand(pos):
 # Pygame setup
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
 pg.init()
-screen = pg.display.set_mode((1300,800))
+screen = pg.display.set_mode((900,800))
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
+card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
 card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
 node_font = pg.font.Font("Montserrat-Regular.ttf", 26)
 count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
@@ -569,7 +622,8 @@ game = Game()
 
 potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.add_player_hp(1)])
 mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 2)])
-goblin_card_prototype = CreatureCard(name="Goblin", cost=2, power=1, toughness=2, attack_phase_fns=[lambda self: game.remove_enemy_hp(1)])
+goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_toughness=2, attack_phase_fns=[lambda self: game.remove_enemy_hp(1)])
+morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,toughness=1,pos=self.pos,distance=2)])
 
 potion_surface = pg.image.load("potion.png")
 potion_surface.set_colorkey(white)
@@ -589,6 +643,7 @@ hand = Hand()
 hand.add_card(potion_card_prototype)
 hand.add_card(mountain_card_prototype, 3)
 hand.add_card(goblin_card_prototype)
+hand.add_card(morale_card_prototype)
 # Testing area
 
 while True:
