@@ -1,5 +1,7 @@
-import sys
+import sys, os, copy
+from enum import Enum, auto, IntEnum
 import pygame as pg
+from pygame.math import Vector2 as Vec
 import numpy as np
 from functools import partial
 
@@ -7,15 +9,15 @@ from functools import partial
 black = (0,0,0)
 grey = (127,127,127)
 light_grey = (200,200,200)
-dark_grey = (60,60,60)
+dark_grey = (30,30,30)
 white = (255,255,255)
 red = (255,0,0)
 green = (0,255,0)
 blue = (0,0,255)
 
 # Game parameters
-grid_count = (5,5)
-node_size = (80,80)
+grid_count = (6,6)
+node_size = (90,90)
 grid_origin = (100,10)
 
 class Node: 
@@ -48,23 +50,6 @@ def get_neighbors(position):
 
 	return neighbors
 
-	# cells = [start_cell]
-	# queue = [{'pos': start_cell, 'd': distance}]
-
-	# if distance > 0:
-	# 	while len(queue) > 0:
-	# 		start_cell, distance = queue[0]['pos'], queue[0]['d']
-	# 		queue.pop(0)
-	# 		neighbors = get_neighbors(start_cell)
-
-	# 		for neighbor in neighbors:
-	# 			if neighbor not in cells:
-	# 				cells.append(neighbor)
-	# 				if (distance-1) > 0:
-	# 					queue.append({'pos': neighbor, 'd': distance-1})
-
-	# return cells
-
 class GameGrid:
 	def __init__(self, size):
 		self.width = size[0]
@@ -89,8 +74,6 @@ class GameGrid:
 			screen.blit(strength_text, (cell_center[0] - 0.5*strength_text.get_width(), cell_center[1] - 0.5*strength_text.get_height()))			
 
 			it.iternext()
-
-
 
 class Grid:
 	def __init__(self, dimensions, origin, cell_size):
@@ -212,9 +195,9 @@ class Grid:
 				surface = pg.transform.scale(source, (new_width,new_height)) # new scaled surface
 
 		cell_pos = self.get_cell_pos(grid_coords, align)
-		draw_surface_aligned(source=surface, pos=cell_pos, align=align, offset=offset)
+		draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
 
-def draw_surface_aligned(source, pos, align=('left','left'), offset=(0,0)):
+def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0)):
 	new_pos = list(np.add(pos, offset))
 
 	if align[0] == 'center':
@@ -227,17 +210,82 @@ def draw_surface_aligned(source, pos, align=('left','left'), offset=(0,0)):
 	elif align[1] == 'down':
 		new_pos[1] -= source.get_height()
 
-	screen.blit(source, new_pos)
+	target.blit(source, new_pos)
 
+hand_card_size = (100,160)
+board_card_size = (56,90)
 
-class ItemPool:
+class Card:
+	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
+		self.name = name
+		self.cost = cost
+
+		self.begin_phase_fns = begin_phase_fns
+		self.attack_phase_fns = attack_phase_fns
+		self.passive_fns = passive_fns
+
+		self.hand_surface = pg.Surface(hand_card_size)
+		pg.draw.rect(self.hand_surface, dark_grey, ((0,0), hand_card_size))
+		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
+		title_surface = card_text_sm.render(self.name, True, white)
+		self.hand_surface.blit(title_surface, (5,0))
+		cost_surface = card_text_lg.render(str(self.cost), True, grey)
+		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
+
+		# node_size = (90,90)
+		# card_size = (100,160)
+		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
+
+	def clone(self):
+		return Card(name = self.name,
+					cost = self.cost,
+					begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
+					attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
+					passive_fns = copy.deepcopy(self.passive_fns))
+
+	def do_passive(self):
+		for fn in self.passive_fns:
+			fn(self)
+
+	def do_begin_phase(self):
+		for fn in self.begin_phase_fns:
+			fn(self)
+
+	def do_attack_phase(self):
+		for fn in self.attack_phase_fns:
+			fn(self)
+
+	def draw(self, pos, type):
+		if type == "hand":
+			screen.blit(self.hand_surface, pos)
+		if type == "board":
+			screen.blit(self.board_surface, pos)
+
+class CreatureCard(Card):
+	def __init__(self, name, cost, power, toughness, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
+		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
+		self.power = power
+		self.toughness = toughness
+
+	def clone(self):
+		return CreatureCard(name = self.name,
+							cost = self.cost,
+							power = self.power,
+							toughness = self.toughness,
+							begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
+							attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
+							passive_fns = copy.deepcopy(self.passive_fns))
+
+class CardPool:
 	def __init__(self):
 		self.names = ['null']
 		self.surfaces = [None]
+		self.cards = [None]
 
 		self.invalid_surface = node_font.render('?', True, red)
+		self.invalid_card = Card([])
 
-	def add_item(self, name, surface):
+	def add_card(self, name, surface, card):
 		result = self.get_id_by_name(name)
 		if result['exists'] == True:
 			print("Tried to add item to item pool with duplicate name. Item not added.")
@@ -245,17 +293,24 @@ class ItemPool:
 
 		self.names.append(name)
 		self.surfaces.append(surface)
+		self.cards.append(card)
 
 		return {'success': True, 'ID': len(self.names)-1}
 
-	def item_exists(self, ID):
+	def card_exists(self, ID):
 		if ID < len(self.names) and ID > 0: # Don't include 'null' item as a valid item (ID > 0)
 			return True
 		else:
 			return False
 
+	def get_card_by_id(self, ID):
+		if self.card_exists(ID):
+			return self.cards[ID]
+		else:
+			return self.invalid_card
+
 	def get_surface_by_id(self, ID):
-		if self.item_exists(ID):
+		if self.card_exists(ID):
 			return self.surfaces[ID]
 		else:
 			return self.invalid_surface
@@ -268,165 +323,231 @@ class ItemPool:
 		return {'exists': False, 'ID': None}
 
 	def get_name_by_id(self, ID):
-		if self.item_exists(ID):
+		if self.card_exists(ID):
 			return {'exists:': True, 'name': self.names[ID]}
 		else:
-			print("Tried to reference item with non-existent name or null item.")
+			print("Tried to reference card with non-existent name or null card.")
 			return {'exists': False, 'name': None}
 
-class Inventory:
+class Hand:
 	def __init__(self):
-		self.items = []
-		self.count_surfaces = []
-		self.grid = Grid(dimensions=(1,0), origin=(10,10), cell_size=node_size)
+		self.cards = []
 		self.selected_index = 0
 
-	def add_item(self, name, count=1):
+		self.origin = Vec(10,620)
+		self.card_spacing = 110
+
+		self.drag_card = None
+		# self.drag_card_index = None
+		self.card_grab_point = None
+
+	def add_item(self, card, count=1):
+		if not isinstance(card, Card):
+			print("Tried to add card to hand that wasn't Card or a subclass.")
+			return
 		if count <= 0:
 			return
 
-		in_inventory = False
-		result = item_pool.get_id_by_name(name)
-		if result['exists'] == False:
-			print("Tried to add invalid item to inventory.")
-			return
-		else:
-			item_id = result['ID']
+		for i in range(count):
+			self.cards.append(card.clone())
 
-		for i, stack in enumerate(self.items):
-			if stack['ID'] == item_id:
-				in_inventory = True
-				stack['count'] += count
-				self.update_count_surface(count=stack['count'], index=i)
+	def mouse_press(self, pos):
+		mouse_x, mouse_y = pos[0], pos[1]
+		for i in range(len(self.cards)):
+			left_x = self.origin[0] + (self.card_spacing * i)
+			right_x = left_x + hand_card_size[0]
+			top_y = self.origin[1]
+			bottom_y = self.origin[1] + hand_card_size[1]
 
-		if not in_inventory:
-			if item_pool.item_exists(item_id):
-				self.items.append({'ID': item_id, 'count': count})
-				self.update_count_surface(count)
-				self.grid.resize((0,1))
+			if mouse_x >= left_x and mouse_x <= right_x and mouse_y > top_y and mouse_y < bottom_y:
+				# Mouse click happened on a card (self.cards[i])
+				if not self.drag_card:
+					self.drag_card = self.cards.pop(i)
+					# self.drag_card_index = i
+					self.card_grab_point = Vec(mouse_x - left_x, mouse_y - top_y)
 
-	def update_count_surface(self, count, index=None):
-		count_surface = count_font.render(str(count), True, white)
+	def mouse_release(self, pos):
+		if self.drag_card:
+			placed_in_board = False # True if card is placed onto the board during this mouse release
 
-		# index=None => add it to the end of the list. i.e., the stack doesn't exist yet
-		if index == None:
-			self.count_surfaces.append(count_surface)
-		else:
-			self.count_surfaces[index] = count_surface
-
-	def get_selected_ID(self):
-		return self.items[self.selected_index]['ID']
-
-	def click(self):
-		result = self.grid.get_cell_at_mouse()
-		if result['hit'] == True:
-			self.selected_index = result['pos'][1]
-
-		result = board.grid.get_cell_at_mouse()
-		if result['hit'] == True:
-			board.set_cell(result['pos'], self.get_selected_ID())
+			result = board.grid.get_cell_at_mouse()
+			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
+				pos = result['pos']
+				if board.cards[pos] == None:
+					placed_in_board = board.place_card(result['pos'], self.drag_card)
+			
+			if placed_in_board == False:
+				self.cards.append(self.drag_card)
+			
+			self.drag_card = None
+			self.card_grab_point = None # Probably not necessary 
 
 	def draw(self):
+		# Draw each card in the hand with horizontal spacing between them
+		for i, card in enumerate(self.cards):
+			card.draw(self.origin + Vec(i*self.card_spacing,0), "hand")
 
-		result = board.grid.get_cell_at_mouse()
-		if result['hit'] == True:
-			board.grid.color_cell(result['pos'], black)
-			board.grid.draw_surface_in_cell(item_pool.get_surface_by_id(self.get_selected_ID()), result['pos'], ('center','center'))
+		# Draw the drag card in a grid cell if the mouse is hovering over it
+		if self.drag_card:
+			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
 
-		result = self.grid.get_cell_at_mouse()
-		if result['hit'] == True:
-			self.grid.color_cell(result['pos'], dark_grey)
+			result = board.grid.get_cell_at_mouse()
+			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
+				pos = result['pos']
+				if board.cards[pos] == None:
+					cell_top_left = board.grid.get_cell_pos(result['pos'], align=('center','top'))
+					cell_top_left[0] -= board_card_size[0]//2
+					self.drag_card.draw(cell_top_left, "board")
+					drawn_in_board = True
+			
+			if drawn_in_board == False:
+				mouse_coords = Vec(pg.mouse.get_pos())
+				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
 
-		for i, stack in enumerate(self.items):
-			self.grid.draw_surface_in_cell(item_pool.get_surface_by_id(stack['ID']), (0,i), align=('center','center'))
-			self.grid.draw_surface_in_cell(self.count_surfaces[i], (0,i), align=('right','down'))
-
-		self.grid.draw(grey)
-
-		if len(self.items) > 0:
-			outline_rect = self.grid.get_cell_rect((0,self.selected_index))
-			pg.draw.rect(screen, white, outline_rect, 3)
+Phases = {	"Begin":	0,
+			"Attack":	1,
+			"End":	 	2,
+			0: "Begin",
+			1: "Attack",
+			2: "End"}
 
 class Game:
 	def __init__(self):
 		self.ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
 
-		self.turn_number = 0
+		self._turn_number = 0
+		# self._phase_name = str()
+		# self._phase_number = int()
+		self.__start_turn()
 		self.__refresh_turn_surface()
 
-		self.player_hp = 20
-		self.enemy_hp = 20
+		self._player_hp = 20
+		self._enemy_hp = 20
 		self.__refresh_hp_surfaces()
 		self.hp_text_offset = (10,0)
 
 	def __refresh_turn_surface(self):
-		self.turn_text= self.ui_font.render("Turn: " + str(self.turn_number), True, white)
+		self.turn_text = self.ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
 
 	def __refresh_hp_surfaces(self):
-		self.player_hp_text = self.ui_font.render("HP: " + str(self.player_hp), True, white)
-		self.enemy_hp_text = self.ui_font.render("HP: " + str(self.enemy_hp), True, grey)
+		self._player_hp_text = self.ui_font.render("HP: " + str(self._player_hp), True, white)
+		self._enemy_hp_text = self.ui_font.render("HP: " + str(self._enemy_hp), True, grey)
+
+	def add_player_hp(self, amount):
+		self._player_hp += amount
+		self.__refresh_hp_surfaces()
+
+	def remove_enemy_hp(self, amount):
+		self._enemy_hp -= amount
+		self.__refresh_hp_surfaces()
+
+	def __start_turn(self):
+		self._phase_name = "Begin"
+		self._phase_number = Phases[self._phase_name]
+
+	def _advance_phase(self):
+		# We do a blind advance phase, and rely on something else to fix it if it goes past the end phase
+		self._phase_number += 1
+		self._phase_name = Phases[self._phase_number]
 
 	def advance_turn(self):
-		self.turn_number += 1
+		if self._phase_name == "Begin":
+			board.do_begin_phase()
+			self._advance_phase()
+		elif self._phase_name == "Attack":
+			board.do_attack_phase()
+			self._advance_phase()
+		elif self._phase_name == "End":
+			self._turn_number += 1
+			self.__start_turn()
+
 		self.__refresh_turn_surface()
 
 	def draw(self):
-		draw_surface_aligned(source=self.turn_text, pos=board.grid.get_grid_pos(align=('left','down')), offset=(0,0))
-		draw_surface_aligned(source=self.player_hp_text, pos=board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
-		draw_surface_aligned(source=self.enemy_hp_text, pos=board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
-
-class GamePiece:
-	def begin_turn(self):
-
+		draw_surface_aligned(target=screen, source=self.turn_text, pos=board.grid.get_grid_pos(align=('left','down')), offset=(0,0))
+		draw_surface_aligned(target=screen, source=self._player_hp_text, pos=board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
+		draw_surface_aligned(target=screen, source=self._enemy_hp_text, pos=board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
 
 class Board:
 	def __init__(self, size):
-		self.powers = np.zeros(size, dtype=np.uint8)
-		self.item_IDs = np.full(size, 0, dtype=np.uint32)
-		self.grid = Grid(size, (100,10), node_size)
+		self.size = size
+		self.cards = np.full(size, None, np.dtype(Card))
+		self.grid = Grid(size, (10,10), node_size)
+		self.__reset_mana()
 
-	def __reset_powers(self):
-		self.powers = np.zeros(self.powers.shape, dtype=np.uint8)
+	def place_card(self, position, card):
+		if self.red_mana[position] >= card.cost:
+			card.pos = position
+			self.cards[position[0]][position[1]] = card
+			self.__update_passives()
+			return True # Successfully fulfilled requirements for placing the card and placed it.
+		else:
+			return False # Some pre-reqs for placing were not filled (mana cost, etc.)
 
-	def set_cell(self, position, item_ID):
-		refresh_powers = False
-		if self.item_IDs[position] == 2 or item_ID == 2: # If previous or new item is a forest
-			refresh_powers = True
+	def __reset_mana(self):
+		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
-		self.item_IDs[position] = item_ID
+	def __update_passives(self):
+		self.__reset_mana()
+		self.do_passive()
 
-		if refresh_powers == True:
-			self.__reset_powers()
-			for i,item_ID in np.ndenumerate(self.item_IDs):
-				if item_ID == 2:
-					for cell_coord in self.grid.get_cells_by_distance(start_cell=i, distance=1):
-						self.powers[cell_coord] += 1
+	def add_mana(self, amount, type, pos, distance=1):
+		if pos:
+			if type == "red":
+				cell_coords = self.grid.get_cells_by_distance(pos, distance)
+				for cell_coord in cell_coords:
+					self.red_mana[cell_coord] += amount
 
-	def begin_turn(self):
-		for i, self.item_IDs
+	def do_passive(self):
+		for _, card in np.ndenumerate(self.cards):
+			if card != None:
+				card.do_passive()
+
+	def do_begin_phase(self):
+		for _, card in np.ndenumerate(self.cards):
+			if card != None:
+				card.do_begin_phase()
+		# for i, ID in np.ndenumerate(self.item_IDs):
+		# 	card_pool.get_card_by_id(ID).do_begin_phase()
+
+	def do_attack_phase(self):
+		for _, card in np.ndenumerate(self.cards):
+			if card != None:
+				card.do_attack_phase()
+		# for i, ID in np.ndenumerate(self.item_IDs):
+		# 	card_pool.get_card_by_id(ID).do_attack_phase()
 
 	def draw(self):
-		for i, item_ID in np.ndenumerate(self.item_IDs):
-			if item_ID != 0:
-				item_surface = item_pool.get_surface_by_id(item_ID)
-				self.grid.draw_surface_in_cell(item_surface, i, align=('center','center'))
+		# Draw the cards in the board
+		for x in range(self.size[0]):
+			for y in range(self.size[1]):
+				card = self.cards[x][y]
+				if card != None:
+					card_pos = self.grid.get_cell_pos((x,y), align=('center','top'))
+					card_pos[0] -= board_card_size[0]//2
+					card.draw(card_pos, 'board')
 
-		for i, power in np.ndenumerate(self.powers):
-			power_surface = count_font.render(str(power), True, green)
+		# (Old) Drawing the power text number in each cell
+		for i, power in np.ndenumerate(self.red_mana):
+			power_surface = count_font.render(str(power), True, red)
 			self.grid.draw_surface_in_cell(power_surface, i, align=('right', 'down'), offset=(-2,-2))
+
 
 		self.grid.draw(grey)
 
 icon_size = 36
 icon_padding = 10
-def draw_inventory(pos):
-	for index, item in enumerate(inventory):
+def draw_hand(pos):
+	for index, item in enumerate(hand):
 		pg.draw.circle(screen, blue, (pos[0] + icon_size//2, pos[1] + icon_size//2 + (icon_size+icon_padding)*index), icon_size//2)
 		pg.draw.circle(screen, white, (pos[0] + icon_size//2, pos[1] + icon_size//2 + (icon_size+icon_padding)*index), icon_size//2, 2)
 
 # Pygame setup
+os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
 pg.init()
-screen = pg.display.set_mode((800,800))
+screen = pg.display.set_mode((1300,800))
+card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
+card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
 node_font = pg.font.Font("Montserrat-Regular.ttf", 26)
 count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
 
@@ -434,21 +555,30 @@ count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
 game_clock = pg.time.Clock()
 
 game = Game()
-item_pool = ItemPool()
+# card_pool = CardPool()
+
+potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.add_player_hp(1)])
+mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 2)])
+goblin_card_prototype = CreatureCard(name="Goblin", cost=2, power=1, toughness=2, attack_phase_fns=[lambda self: game.remove_enemy_hp(1)])
 
 potion_surface = pg.image.load("potion.png")
 potion_surface.set_colorkey(white)
-result = item_pool.add_item("potion", potion_surface)
+# card_pool.add_card("Potion", potion_surface, potion_card_prototype)
 
-forest_surface = pg.Surface(node_size)
-pg.draw.circle(forest_surface, green, (node_size[0]//2, node_size[1]//2), 10)
-result = item_pool.add_item("forest", forest_surface)
+mountain_surface = pg.Surface(node_size)
+mountain_surface.set_colorkey(black)
+pg.draw.circle(mountain_surface, green, (node_size[0]//2, node_size[1]//2), 10)
+# card_pool.add_card("mountain", mountain_surface, mountain_card_prototype)
 
-board = Board((7,7))
+goblin_surface = node_font.render('G', True, red)
+# card_pool.add_card("Goblin", goblin_surface, goblin_card_prototype)
 
-inventory = Inventory()
-inventory.add_item("forest", 3)
-inventory.add_item("potion", 5)
+board = Board(grid_count)
+
+hand = Hand()
+hand.add_item(potion_card_prototype)
+hand.add_item(mountain_card_prototype, 3)
+hand.add_item(goblin_card_prototype)
 # Testing area
 
 while True:
@@ -457,16 +587,21 @@ while True:
 			sys.exit()
 		elif event.type == pg.MOUSEBUTTONDOWN:
 			if event.button == 1:
-				inventory.click()
+				hand.mouse_press(event.pos)
+		elif event.type == pg.MOUSEBUTTONUP:
+			if event.button == 1:
+				hand.mouse_release(event.pos)
 		elif event.type == pg.KEYDOWN:
-			if event.key == pg.K_SPACE:
+			if event.key == pg.K_ESCAPE:
+				sys.exit()
+			elif event.key == pg.K_SPACE:
 				game.advance_turn()
 
 	game_clock.tick(60)
 	screen.fill(black)
 
-	inventory.draw()
 	board.draw()
+	hand.draw()
 	game.draw()
 
 	pg.display.flip()
