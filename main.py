@@ -341,7 +341,7 @@ class Hand:
 		# self.drag_card_index = None
 		self.card_grab_point = None
 
-	def add_item(self, card, count=1):
+	def add_card(self, card, count=1):
 		if not isinstance(card, Card):
 			print("Tried to add card to hand that wasn't Card or a subclass.")
 			return
@@ -472,22 +472,32 @@ class Board:
 	def __init__(self, size):
 		self.size = size
 		self.cards = np.full(size, None, np.dtype(Card))
-		self.grid = Grid(size, (10,10), node_size)
+		self.grid = Grid(dimensions=size, origin=(10,10), cell_size=node_size)
 		self.__reset_mana()
 
 	def place_card(self, position, card):
 		if self.red_mana[position] >= card.cost:
 			card.pos = position
 			self.cards[position[0]][position[1]] = card
-			self.__update_passives()
+			self.__refresh_passives()
 			return True # Successfully fulfilled requirements for placing the card and placed it.
 		else:
 			return False # Some pre-reqs for placing were not filled (mana cost, etc.)
 
+	def right_mouse_press(self, pos):
+		result = self.grid.get_cell_at_mouse()
+		if result['hit'] == True:
+			grid_pos = result['pos']
+			if self.cards[grid_pos] != None:
+				hand.add_card(self.cards[grid_pos])
+				self.cards[grid_pos] = None
+
+			self.__refresh_passives()
+
 	def __reset_mana(self):
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
-	def __update_passives(self):
+	def __refresh_passives(self):
 		self.__reset_mana()
 		self.do_passive()
 
@@ -576,9 +586,9 @@ goblin_surface = node_font.render('G', True, red)
 board = Board(grid_count)
 
 hand = Hand()
-hand.add_item(potion_card_prototype)
-hand.add_item(mountain_card_prototype, 3)
-hand.add_item(goblin_card_prototype)
+hand.add_card(potion_card_prototype)
+hand.add_card(mountain_card_prototype, 3)
+hand.add_card(goblin_card_prototype)
 # Testing area
 
 while True:
@@ -588,6 +598,8 @@ while True:
 		elif event.type == pg.MOUSEBUTTONDOWN:
 			if event.button == 1:
 				hand.mouse_press(event.pos)
+			if event.button == 3:
+				board.right_mouse_press(event.pos)
 		elif event.type == pg.MOUSEBUTTONUP:
 			if event.button == 1:
 				hand.mouse_release(event.pos)
