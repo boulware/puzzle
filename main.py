@@ -12,8 +12,10 @@ light_grey = (200,200,200)
 dark_grey = (30,30,30)
 white = (255,255,255)
 red = (255,0,0)
+dark_red = (70,0,0)
 green = (0,255,0)
 blue = (0,0,255)
+dark_blue = (0,0,70)
 
 # Game parameters
 grid_count = (5,6)
@@ -129,7 +131,7 @@ class Grid:
 		return pos
 
 	# Return the grid position in screen space. Align lets you choose among the corners, centers of edges, or center. Default params give top left corner
-	def get_grid_pos(self, align=('left','up')):
+	def get_grid_pos(self, align=('left','up'), offset=(0,0)):
 		pos = list(self.rect.topleft)
 
 		if align[0] == 'center':
@@ -140,7 +142,10 @@ class Grid:
 		if align[1] == 'center':
 			pos[1] += self.rect.height//2
 		elif align[1] == 'down':
-			pos[1] += self.rect.height	
+			pos[1] += self.rect.height
+
+		pos[0] += offset[0]
+		pos[1] += offset[1]
 
 		return pos
 
@@ -173,6 +178,12 @@ class Grid:
 
 	def get_cell_rect(self, position):
 		return pg.Rect(self.get_cell_pos(position), np.add(self.cell_size, (1,1)))
+
+	def check_cell_valid(self, cell):
+		if cell[0] < 0 or cell[0] > self.dimensions[0]-1 or cell[1] < 0 or cell[1] > self.dimensions[1]-1:
+			return False
+		else:
+			return True
 
 	def draw_surface_in_cell(self, source, grid_coords, align=('left','up'), stretch=False, offset=(0,0)):
 		surface = source
@@ -221,6 +232,8 @@ class Card:
 	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
 		self.name = name
 		self.cost = cost
+		self.pos = None
+		self.owner = None
 
 		self.begin_phase_fns = begin_phase_fns
 		self.attack_phase_fns = attack_phase_fns
@@ -232,8 +245,14 @@ class Card:
 		self.generate_surfaces()
 
 	def __generate_hand_surface(self):
+		bg_color = dark_grey
+		if self.owner == 0:
+			bg_color = dark_red
+		elif self.owner == 1:
+			bg_color = dark_blue
+
 		self.hand_surface = pg.Surface(hand_card_size)
-		pg.draw.rect(self.hand_surface, dark_grey, ((0,0), hand_card_size))
+		pg.draw.rect(self.hand_surface, bg_color, ((0,0), hand_card_size))
 		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
 		title_surface = card_text_sm.render(self.name, True, white)
 		self.hand_surface.blit(title_surface, (5,0))
@@ -243,9 +262,22 @@ class Card:
 	def __generate_board_surface(self):
 		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
 
+	@property
+	def enemy(self):
+		if self.owner == 0:
+			return 1
+		elif self.owner == 1:
+			return 0
+		else:
+			return None
+
 	def generate_surfaces(self):
 		self.__generate_hand_surface()
 		self.__generate_board_surface()
+
+	def set_owner(self, owner):
+		self.owner = owner
+		self.generate_surfaces()
 
 	def clone(self):
 		return Card(name = self.name,
@@ -400,7 +432,6 @@ class CardPool:
 class Hand:
 	def __init__(self):
 		self.cards = []
-		self.selected_index = 0
 
 		self.origin = Vec(10,620)
 		self.card_spacing = 110
@@ -418,6 +449,9 @@ class Hand:
 
 		for i in range(count):
 			self.cards.append(card.clone())
+
+	def clear_hand(self):
+		self.cards = []
 
 	def mouse_press(self, pos):
 		mouse_x, mouse_y = pos[0], pos[1]
@@ -479,52 +513,99 @@ Phases = {	"Begin":	0,
 			1: "Attack",
 			2: "End"}
 
+line_spacing = 9
+
+class TurnDisplay:
+	def __init__(self):
+		self.phase = "Begin"
+		self.phase_text = None
+		self.__generate_phase_text()
+
+
+	def set_active_phase(self, phase):
+		self.phase = phase
+		self.__generate_phase_text()
+
+	def __generate_phase_text(self):
+		begin_color, attack_color, end_color = white, white, white
+
+		if self.phase == "Begin":
+			begin_color = green
+		elif self.phase == "Attack":
+			attack_color = green
+		elif self.phase == "End":
+			end_color = green
+
+		begin_text = ui_font.render("Begin", True, begin_color)
+		attack_text = ui_font.render("Attack", True, attack_color)
+		end_text = ui_font.render("End", True, end_color)
+
+		if self.phase_text == None:
+			sum_heights = 24*3 + line_spacing*2
+			max_width = max(begin_text.get_width(), attack_text.get_width(), end_text.get_width())
+			self.phase_text = pg.Surface((max_width, sum_heights + line_spacing*2))
+			self.phase_text.set_colorkey(black)
+		else:
+			self.phase_text.fill(black)
+
+		self.phase_text.blit(begin_text, (0,0))
+		self.phase_text.blit(attack_text, (0,24+line_spacing*1))
+		self.phase_text.blit(end_text, (0,48+line_spacing*2))
+
+	def draw(self, pos, align):
+		draw_surface_aligned(target=screen, source=self.phase_text, pos=pos, align=align)
+
+
 class Game:
 	def __init__(self):
-		self.ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
+		self.turn_display = TurnDisplay()
 
 		self._turn_number = 0
-		# self._phase_name = str()
-		# self._phase_number = int()
 		self.__start_turn()
 		self.__refresh_turn_surface()
 
-		self._player_hp = 20
-		self._enemy_hp = 20
+		self.player_healths = [20,20]
 		self.__refresh_hp_surfaces()
 		self.hp_text_offset = (10,0)
 
 	def __refresh_turn_surface(self):
-		self.turn_text = self.ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
+		self.turn_text = ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
 
 	def __refresh_hp_surfaces(self):
-		self._player_hp_text = self.ui_font.render("HP: " + str(self._player_hp), True, white)
-		self._enemy_hp_text = self.ui_font.render("HP: " + str(self._enemy_hp), True, grey)
+		self._bottom_hp_text = ui_font.render("HP: " + str(self.player_healths[0]), True, white)
+		self._top_hp_text = ui_font.render("HP: " + str(self.player_healths[1]), True, grey)
 
-	def add_player_hp(self, amount):
-		self._player_hp += amount
-		self.__refresh_hp_surfaces()
+	def is_valid_player(self, player):
+		if player == 0 or player == 1:
+			return True
+		else:
+			return False
 
-	def remove_enemy_hp(self, amount):
-		self._enemy_hp -= amount
-		self.__refresh_hp_surfaces()
+	def change_health(self, amount, player):
+		if self.is_valid_player(player):
+			self.player_healths[player] += amount
+			self.__refresh_hp_surfaces()
+		else:
+			print("Tried to change health of invalid player.")
 
 	def __start_turn(self):
 		self._phase_name = "Begin"
 		self._phase_number = Phases[self._phase_name]
+		self.turn_display.set_active_phase(self._phase_name)
 
-	def _advance_phase(self):
+	def __advance_phase(self):
 		# We do a blind advance phase, and rely on something else to fix it if it goes past the end phase
 		self._phase_number += 1
 		self._phase_name = Phases[self._phase_number]
+		self.turn_display.set_active_phase(self._phase_name)
 
 	def advance_turn(self):
 		if self._phase_name == "Begin":
 			board.do_begin_phase()
-			self._advance_phase()
+			self.__advance_phase()
 		elif self._phase_name == "Attack":
 			board.do_attack_phase()
-			self._advance_phase()
+			self.__advance_phase()
 		elif self._phase_name == "End":
 			self._turn_number += 1
 			self.__start_turn()
@@ -532,9 +613,10 @@ class Game:
 		self.__refresh_turn_surface()
 
 	def draw(self):
-		draw_surface_aligned(target=screen, source=self.turn_text, pos=board.grid.get_grid_pos(align=('left','down')), offset=(0,0))
-		draw_surface_aligned(target=screen, source=self._player_hp_text, pos=board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
-		draw_surface_aligned(target=screen, source=self._enemy_hp_text, pos=board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
+		self.turn_display.draw(board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
+		#draw_surface_aligned(target=screen, source=self.turn_text, pos=board.grid.get_grid_pos(align=('left','down')), offset=(0,0))
+		draw_surface_aligned(target=screen, source=self._bottom_hp_text, pos=board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
+		draw_surface_aligned(target=screen, source=self._top_hp_text, pos=board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
 
 class Board:
 	def __init__(self, size):
@@ -544,11 +626,19 @@ class Board:
 		self.__reset_mana()
 
 	def place_card(self, position, card):
-		card.pos = position
-		self.cards[position] = card
-		self.__refresh_passives()
+		if self.grid.check_cell_valid(position) == True:
+			card.pos = position
+			if position[1] < grid_count[1]//2:
+				card.set_owner(1)
+			else:
+				card.set_owner(0)
+			self.cards[position] = card
+			self.__refresh_passives()
 
-		return True # Successfully fulfilled requirements for placing the card and placed it.
+			return True # Successfully fulfilled requirements for placing the card and placed it.
+		else:
+			print("Tried to place card in invalid cell")
+			return False
 
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
@@ -661,6 +751,7 @@ card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
 card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
 node_font = pg.font.Font("Montserrat-Regular.ttf", 26)
 count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
+ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
 
 # Game setup
 game_clock = pg.time.Clock()
@@ -668,22 +759,10 @@ game_clock = pg.time.Clock()
 game = Game()
 # card_pool = CardPool()
 
-potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.add_player_hp(1)])
+potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.change_health(1, self.owner)])
 mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 2)])
-goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_toughness=2, attack_phase_fns=[lambda self: game.remove_enemy_hp(self.power)])
+goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_toughness=2, attack_phase_fns=[lambda self: game.change_health(-self.power, self.enemy)])
 morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,toughness=1,pos=self.pos,distance=2)])
-
-potion_surface = pg.image.load("potion.png")
-potion_surface.set_colorkey(white)
-# card_pool.add_card("Potion", potion_surface, potion_card_prototype)
-
-mountain_surface = pg.Surface(node_size)
-mountain_surface.set_colorkey(black)
-pg.draw.circle(mountain_surface, green, (node_size[0]//2, node_size[1]//2), 10)
-# card_pool.add_card("mountain", mountain_surface, mountain_card_prototype)
-
-goblin_surface = node_font.render('G', True, red)
-# card_pool.add_card("Goblin", goblin_surface, goblin_card_prototype)
 
 board = Board(grid_count)
 
@@ -711,6 +790,14 @@ while True:
 				sys.exit()
 			elif event.key == pg.K_SPACE:
 				game.advance_turn()
+			elif event.key == pg.K_1:
+				hand.add_card(mountain_card_prototype)
+			elif event.key == pg.K_2:
+				hand.add_card(goblin_card_prototype)
+			elif event.key == pg.K_3:
+				hand.add_card(morale_card_prototype)
+			elif event.key == pg.K_DELETE:
+				hand.clear_hand()
 
 	game_clock.tick(60)
 	screen.fill(black)
