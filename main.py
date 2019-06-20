@@ -1,4 +1,4 @@
-import sys, os, copy
+import sys, os, copy, collections
 from enum import Enum, auto, IntEnum
 import pygame as pg
 from pygame.math import Vector2 as Vec
@@ -16,7 +16,7 @@ green = (0,255,0)
 blue = (0,0,255)
 
 # Game parameters
-grid_count = (6,6)
+grid_count = (5,6)
 node_size = (90,90)
 grid_origin = (100,10)
 
@@ -215,6 +215,8 @@ def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0
 hand_card_size = (100,160)
 board_card_size = (56,90)
 
+CreatureStats = collections.namedtuple('CreatureStats', 'power toughness')
+
 class Card:
 	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
 		self.name = name
@@ -225,11 +227,9 @@ class Card:
 		self.passive_fns = passive_fns
 		self.buffs = []
 
-		self.__generate_hand_surface()
-		self.__refresh_board_surface()
+		self.active = False
 
-	def __refresh_board_surface(self):
-		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
+		self.generate_surfaces()
 
 	def __generate_hand_surface(self):
 		self.hand_surface = pg.Surface(hand_card_size)
@@ -240,6 +240,13 @@ class Card:
 		cost_surface = card_text_lg.render(str(self.cost), True, grey)
 		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
 
+	def __generate_board_surface(self):
+		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
+
+	def generate_surfaces(self):
+		self.__generate_hand_surface()
+		self.__generate_board_surface()
+
 	def clone(self):
 		return Card(name = self.name,
 					cost = self.cost,
@@ -247,41 +254,51 @@ class Card:
 					attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
 					passive_fns = copy.deepcopy(self.passive_fns))
 
-	def apply_buffs(self):
+	def apply_buff(self):
 		pass
 
-	def __refresh_buffs(self):
-		pass
+	def clear_buffs(self):
+		self.buffs=[]
+		self.generate_surfaces()
 
 	def do_passive(self):
-		for fn in self.passive_fns:
-			fn(self)
+		if self.active:
+			for fn in self.passive_fns:
+				fn(self)
 
 	def do_begin_phase(self):
-		for fn in self.begin_phase_fns:
-			fn(self)
+		if self.active:
+			for fn in self.begin_phase_fns:
+				fn(self)
 
 	def do_attack_phase(self):
-		for fn in self.attack_phase_fns:
-			fn(self)
+		if self.active:
+			for fn in self.attack_phase_fns:
+				fn(self)
 
-	def draw(self, pos, type):
-		if type == "hand":
+	def draw(self, pos, location):
+		if location == "hand":
 			screen.blit(self.hand_surface, pos)
-		if type == "board":
+		if location == "board" or location == "board_hover":
 			screen.blit(self.board_surface, pos)
+
+		if self.active == False and location == "board":
+			pg.draw.line(screen, red, pos, (pos[0]+board_card_size[0], pos[1]+board_card_size[1]))
 
 class CreatureCard(Card):
 	def __init__(self, name, cost, base_power, base_toughness, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
-		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
 		self.base_power = base_power
 		self.base_toughness = base_toughness
 
-		self.__generate_hand_surface()
-		self.__refresh_board_surface()
+		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
 
-	def __refresh_board_surface(self):
-		self._Card__refresh_board_surface()
+	@property
+	def power(self):
+		return self.get_stats().power
+
+	@property
+	def toughness(self):
+		return self.get_stats().toughness
 
 	def __generate_hand_surface(self):
 		self._Card__generate_hand_surface()
@@ -294,13 +311,19 @@ class CreatureCard(Card):
 								align=('right','down'),
 								offset=(-2,-2))
 
-	def apply_buffs(self, power=0, toughness=0):
+	def __generate_board_surface(self):
+		self._Card__generate_board_surface()
+
+	def generate_surfaces(self):
+		self.__generate_hand_surface()
+		self.__generate_board_surface()
+
+	def apply_buff(self, power=0, toughness=0):
 		buff = (power,toughness)
 		if buff != (0,0):
 			self.buffs.append(buff)
 
-		self.__generate_hand_surface()
-		self.__refresh_board_surface()
+		self.generate_surfaces()
 
 	def get_stats(self):
 		power = self.base_power
@@ -310,7 +333,7 @@ class CreatureCard(Card):
 			power += buff[0]
 			toughness += buff[1]
 
-		return (power, toughness)
+		return CreatureStats(power=power, toughness=toughness)
 
 	def clone(self):
 		return CreatureCard(name = self.name,
@@ -442,7 +465,7 @@ class Hand:
 				if board.cards[pos] == None:
 					cell_top_left = board.grid.get_cell_pos(result['pos'], align=('center','top'))
 					cell_top_left[0] -= board_card_size[0]//2
-					self.drag_card.draw(cell_top_left, "board")
+					self.drag_card.draw(cell_top_left, "board_hover")
 					drawn_in_board = True
 			
 			if drawn_in_board == False:
@@ -521,30 +544,55 @@ class Board:
 		self.__reset_mana()
 
 	def place_card(self, position, card):
-		if self.red_mana[position] >= card.cost:
-			card.pos = position
-			self.cards[position[0]][position[1]] = card
+		card.pos = position
+		self.cards[position] = card
+		self.__refresh_passives()
+
+		return True # Successfully fulfilled requirements for placing the card and placed it.
+
+	def return_card_to_hand(self, cell):
+		if self.cards[cell] != None:
+			hand.add_card(self.cards[cell])
+			self.cards[cell] = None
 			self.__refresh_passives()
-			return True # Successfully fulfilled requirements for placing the card and placed it.
+
+			return True # Card returned
 		else:
-			return False # Some pre-reqs for placing were not filled (mana cost, etc.)
+			return False # No card returned
 
 	def right_mouse_press(self, pos):
 		result = self.grid.get_cell_at_mouse()
 		if result['hit'] == True:
-			grid_pos = result['pos']
-			if self.cards[grid_pos] != None:
-				hand.add_card(self.cards[grid_pos])
-				self.cards[grid_pos] = None
-
+			cell = result['pos']
+			self.return_card_to_hand(cell)
 			self.__refresh_passives()
 
 	def __reset_mana(self):
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
 	def __refresh_passives(self):
+		dirty = False
+
+		for cell, card in np.ndenumerate(self.cards):
+			if card != None:
+				if self.red_mana[cell] >= card.cost and card.active != True:
+					dirty = True
+					card.active = True
+				elif self.red_mana[cell] < card.cost and card.active != False:
+					dirty = True
+					card.active = False
+
 		self.__reset_mana()
+		self.__clear_buffs()
 		self.do_passive()
+
+		if dirty == True:
+			self.__refresh_passives() # Iterative refreshes when state has changed
+
+	def __clear_buffs(self):
+		for _, card in np.ndenumerate(self.cards):
+			if card != None:
+				card.clear_buffs()
 
 	def add_mana(self, amount, type, pos, distance=1):
 		if pos:
@@ -558,7 +606,7 @@ class Board:
 			cell_coords = self.grid.get_cells_by_distance(pos, distance)
 			for cell_coord in cell_coords:
 				if isinstance(self.cards[cell_coord], CreatureCard):
-					self.cards[cell_coord].apply_buffs(power=1,toughness=1)
+					self.cards[cell_coord].apply_buff(power=1,toughness=1)
 
 	def do_passive(self):
 		for _, card in np.ndenumerate(self.cards):
@@ -607,7 +655,7 @@ def draw_hand(pos):
 # Pygame setup
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
 pg.init()
-screen = pg.display.set_mode((900,800))
+screen = pg.display.set_mode((700,800))
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
 card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
 card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
@@ -622,7 +670,7 @@ game = Game()
 
 potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.add_player_hp(1)])
 mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 2)])
-goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_toughness=2, attack_phase_fns=[lambda self: game.remove_enemy_hp(1)])
+goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_toughness=2, attack_phase_fns=[lambda self: game.remove_enemy_hp(self.power)])
 morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,toughness=1,pos=self.pos,distance=2)])
 
 potion_surface = pg.image.load("potion.png")
@@ -642,7 +690,7 @@ board = Board(grid_count)
 hand = Hand()
 hand.add_card(potion_card_prototype)
 hand.add_card(mountain_card_prototype, 3)
-hand.add_card(goblin_card_prototype)
+hand.add_card(goblin_card_prototype, 2)
 hand.add_card(morale_card_prototype)
 # Testing area
 
