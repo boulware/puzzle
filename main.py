@@ -1,4 +1,4 @@
-import sys, os, copy, collections
+import sys, os, copy, collections, traceback
 from enum import Enum, auto, IntEnum
 import pygame as pg
 from pygame.math import Vector2 as Vec
@@ -316,8 +316,8 @@ class Card:
 		pass
 
 	def clear_buffs(self):
-		self.buffs=[]
-		self.generate_surfaces()
+		self.buffs = []
+		self.dirty = True
 
 	def do_passive(self):
 		if self.active:
@@ -360,9 +360,7 @@ class HealthBar:
 		return self._surface
 	
 	def _generate_surface(self):
-		print("generate healthbar surface with current health=", self.health)
 		self._surface = pg.Surface(self.size)
-		print("current: %s; max: %s" % (self.health, self.max_health))
 		red_height = int(self.health/self.max_health*self.size[1])
 		pg.draw.rect(self.surface, red, (0, self.size[1]-red_height, self.size[0], self.size[1]))
 
@@ -377,6 +375,19 @@ class HealthBar:
 		self.health = np.clip(self.health, 0, self.max_health)
 
 	@property
+	def max_health(self):
+		return self._max_health
+	
+	@property
+	def max_health(self):
+		return self._max_health
+	
+	@max_health.setter
+	def max_health(self, max_health):
+		self.dirty = True
+		self._max_health = max_health
+
+	@property
 	def health(self):
 		return self._health
 
@@ -387,7 +398,6 @@ class HealthBar:
 	
 	def set_health(self, new_health):
 		self.dirty = True
-		print("health set to: ", new_health)
 
 		self.health = new_health
 		self._clamp_health()
@@ -402,13 +412,13 @@ class HealthBar:
 
 class CreatureCard(Card):
 	def __init__(self, name, cost, base_power, base_max_health, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
+		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
+
+		self.health_bar = HealthBar(base_max_health, (15,100))
+
 		self._base_power = base_power
 		self._base_max_health = base_max_health
-		self._health = base_max_health
-
-		self.health_bar = HealthBar(base_max_health, (10,50))
-
-		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
+		self.health = base_max_health
 
 	@property
 	def power(self):
@@ -447,8 +457,6 @@ class CreatureCard(Card):
 	def _generate_hand_surface(self):
 		Card._generate_hand_surface(self)
 
-		print("generating new creaturecard surface")
-
 		# Draw power value
 		power_text = card_text_sm.render(str(self.power), True, green)
 		bottomleft = self.hand_surface.get_rect().bottomleft
@@ -483,9 +491,13 @@ class CreatureCard(Card):
 	def apply_buff(self, power=0, max_health=0):
 		buff = (power,max_health)
 		if buff != (0,0):
+			self.dirty = True
 			self.buffs.append(buff)
+			self.health_bar.max_health = self.max_health
 
-		self.generate_surfaces()
+	def clear_buffs(self):
+		Card.clear_buffs(self)
+		self.health_bar.max_health = self.max_health
 
 	def do_attack_phase(self):
 		Card.do_attack_phase(self)
@@ -744,14 +756,14 @@ class Board:
 		self.size = size
 		self.cards = np.full(size, None, np.dtype(Card))
 		self.grid = Grid(dimensions=size, origin=(10,10), cell_size=node_size)
-		self.__reset_mana()
+		self._reset_mana()
 
 	def place_card(self, cell, card):
 		if self.grid.check_cell_valid(cell) == True:
 			card.pos = cell
 			card.owner = board.get_cell_owner(cell)
 			self.cards[cell] = card
-			self.__refresh_passives()
+			self._refresh_passives()
 
 			return True # Successfully fulfilled requirements for placing the card and placed it.
 		else:
@@ -763,7 +775,7 @@ class Board:
 			self.cards[cell].owner = None
 			hand.add_card(self.cards[cell])
 			self.cards[cell] = None
-			self.__refresh_passives()
+			self._refresh_passives()
 
 			return True # Card returned
 		else:
@@ -774,7 +786,7 @@ class Board:
 		if result['hit'] == True:
 			cell = result['pos']
 			self.return_card_to_hand(cell)
-			self.__refresh_passives()
+			self._refresh_passives()
 
 	def get_cell_owner(self, cell):
 		if self.grid.check_cell_valid(cell) == True:
@@ -806,10 +818,10 @@ class Board:
 
 		return True
 
-	def __reset_mana(self):
+	def _reset_mana(self):
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
-	def __refresh_passives(self):
+	def _refresh_passives(self):
 		dirty = False
 
 		for cell, card in np.ndenumerate(self.cards):
@@ -821,14 +833,15 @@ class Board:
 					dirty = True
 					card.active = False
 
-		self.__reset_mana()
-		self.__clear_buffs()
+		self._reset_mana()
+		self._clear_buffs()
 		self.do_passive()
 
 		if dirty == True:
-			self.__refresh_passives() # Iterative refreshes when state has changed
+			self._refresh_passives() # Iterative refreshes when state has changed
+			# This is necessary because of the complex interactions between cards
 
-	def __clear_buffs(self):
+	def _clear_buffs(self):
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
 				card.clear_buffs()
@@ -848,6 +861,7 @@ class Board:
 					self.cards[cell_coord].apply_buff(power=1,max_health=1)
 
 	def do_passive(self):
+		#traceback.print_stack()
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
 				card.do_passive()
