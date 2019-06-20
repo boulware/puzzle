@@ -226,7 +226,7 @@ def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0
 hand_card_size = (100,160)
 board_card_size = (56,90)
 
-CreatureStats = collections.namedtuple('CreatureStats', 'power health')
+CreatureStats = collections.namedtuple('CreatureStats', 'power max_health')
 
 class Card:
 	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
@@ -241,17 +241,38 @@ class Card:
 		self.buffs = []
 
 		self.active = False
+		self.dirty = True
 
-		self.generate_surfaces()
+		self._hand_surface = None
+		self._board_surface = None
 
-	def __generate_hand_surface(self):
+	@property
+	def hand_surface(self):
+		if not self._hand_surface or self.dirty:
+			self.dirty = False
+			self.generate_surfaces()
+
+		return self._hand_surface
+
+	@property
+	def board_surface(self):
+		if not self._board_surface or self.dirty:
+			self.dirty = False
+			self.generate_surfaces()
+
+		return self._board_surface
+	
+	
+
+	def _generate_hand_surface(self):
 		bg_color = dark_grey
 		if self.owner == 0:
 			bg_color = dark_red
 		elif self.owner == 1:
 			bg_color = dark_blue
 
-		self.hand_surface = pg.Surface(hand_card_size)
+		self._hand_surface = pg.Surface(hand_card_size)
+
 		pg.draw.rect(self.hand_surface, bg_color, ((0,0), hand_card_size))
 		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
 		title_surface = card_text_sm.render(self.name, True, white)
@@ -259,12 +280,11 @@ class Card:
 		cost_surface = card_text_lg.render(str(self.cost), True, grey)
 		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
 
-	def __generate_board_surface(self):
-		self.board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
+	def _generate_board_surface(self):
+		self._board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
 
 	@property
 	def enemy(self):
-		print("pos=", self.pos, "name=", self.name, "owner=", self.owner)
 		if self.owner == 0:
 			return 1
 		elif self.owner == 1:
@@ -273,8 +293,8 @@ class Card:
 			return None
 
 	def generate_surfaces(self):
-		self.__generate_hand_surface()
-		self.__generate_board_surface()
+		self._generate_hand_surface()
+		self._generate_board_surface()
 
 	@property
 	def owner(self):
@@ -323,41 +343,145 @@ class Card:
 		if self.active == False and location == "board":
 			pg.draw.line(screen, red, pos, (pos[0]+board_card_size[0], pos[1]+board_card_size[1]))
 
+class HealthBar:
+	def __init__(self, max_health, size):
+		self.max_health = max_health
+		self.size = size
+		self.health = max_health
+		self._surface = None
+		self.dirty = True
+
+	@property
+	def surface(self):
+		if not self._surface or self.dirty:
+			self.dirty = False
+			self._generate_surface()
+
+		return self._surface
+	
+	def _generate_surface(self):
+		print("generate healthbar surface with current health=", self.health)
+		self._surface = pg.Surface(self.size)
+		print("current: %s; max: %s" % (self.health, self.max_health))
+		red_height = int(self.health/self.max_health*self.size[1])
+		pg.draw.rect(self.surface, red, (0, self.size[1]-red_height, self.size[0], self.size[1]))
+
+		pg.draw.line(self.surface, white, (0,0), (0,self.size[1])) # draw left edge
+		pg.draw.line(self.surface, white, (self.size[0],0), (self.size[0], self.size[1])) # draw right edge
+
+		# draw borders which delineate cells (max_health+1 because we're drawing borders, not the cells themselves)
+		for y in np.linspace(0, self.size[1], self.max_health+1):
+			pg.draw.line(self.surface, white, (0,y), (self.size[0],y))
+
+	def _clamp_health(self):
+		self.health = np.clip(self.health, 0, self.max_health)
+
+	@property
+	def health(self):
+		return self._health
+
+	@health.setter
+	def health(self, health):
+		self.dirty = True
+		self._health = health
+	
+	def set_health(self, new_health):
+		self.dirty = True
+		print("health set to: ", new_health)
+
+		self.health = new_health
+		self._clamp_health()
+
+	# def change_health(self, amount):
+	# 	if amount == 0:
+	# 		return
+	# 	self.dirty = True
+
+	# 	self.health += amount
+	# 	self._clamp_health()
+
 class CreatureCard(Card):
-	def __init__(self, name, cost, base_power, base_health, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
-		self.base_power = base_power
-		self.base_health = base_health
+	def __init__(self, name, cost, base_power, base_max_health, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
+		self._base_power = base_power
+		self._base_max_health = base_max_health
+		self._health = base_max_health
+
+		self.health_bar = HealthBar(base_max_health, (10,50))
 
 		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
 
 	@property
 	def power(self):
-		return self.get_stats().power
+		power = self._base_power
+		for buff in self.buffs:
+			power += buff[0]
+
+		return power
+
+	@property
+	def max_health(self):
+		max_health = self._base_max_health
+		for buff in self.buffs:
+			max_health += buff[1]
+
+		return max_health
 
 	@property
 	def health(self):
-		return self.get_stats().health
+		return self._health
 
-	def __generate_hand_surface(self):
-		self._Card__generate_hand_surface()
-		stats = self.get_stats()
-		stats_surface = card_text_sm.render(str(stats[0]) + '/' + str(stats[1]), True, green)
-		bottomright = self.hand_surface.get_rect().bottomright
+	@health.setter
+	def health(self, health):
+		self.dirty = True
+		self._health = health
+		self._clamp_health()
+
+		self.health_bar.set_health(self.health)
+
+	def change_health(self, amount):
+		self.health += amount
+
+	def _clamp_health(self):
+		self._health = np.clip(self.health, 0, self.max_health)
+
+	def _generate_hand_surface(self):
+		Card._generate_hand_surface(self)
+
+		print("generating new creaturecard surface")
+
+		# Draw power value
+		power_text = card_text_sm.render(str(self.power), True, green)
+		bottomleft = self.hand_surface.get_rect().bottomleft
 		draw_surface_aligned(	target=self.hand_surface, 
-								source=stats_surface,
-								pos=bottomright,
-								align=('right','down'),
-								offset=(-2,-2))
+								source=power_text,
+								pos=bottomleft,
+								align=('left','down'),
+								offset=(6,-4))
 
-	def __generate_board_surface(self):
-		self._Card__generate_board_surface()
+		# Draw health bar
+		draw_surface_aligned(	target=self.hand_surface,
+								source=self.health_bar.surface,
+								pos=hand_card_size,
+								align=('right','down'),
+								offset=(-1,-1))
+
+		health_text = card_text_med.render(str(self.health), True, red)
+		draw_surface_aligned(	target=self.hand_surface,
+								source=health_text,
+								pos=hand_card_size,
+								align=('right','down'),
+								offset=(-20,1))
+
+
+	def _generate_board_surface(self):
+		Card._generate_board_surface(self)
 
 	def generate_surfaces(self):
-		self.__generate_hand_surface()
-		self.__generate_board_surface()
+		self._generate_hand_surface()
+		self._generate_board_surface()
 
-	def apply_buff(self, power=0, health=0):
-		buff = (power,health)
+	def apply_buff(self, power=0, max_health=0):
+		buff = (power,max_health)
 		if buff != (0,0):
 			self.buffs.append(buff)
 
@@ -366,24 +490,13 @@ class CreatureCard(Card):
 	def do_attack_phase(self):
 		Card.do_attack_phase(self)
 		if board.check_if_card_is_front(self.pos) == True:
-			print("changing health of player[", self.enemy, "]")
 			game.change_health(-self.power, self.enemy)
-
-	def get_stats(self):
-		power = self.base_power
-		health = self.base_health
-
-		for buff in self.buffs:
-			power += buff[0]
-			health += buff[1]
-
-		return CreatureStats(power=power, health=health)
 
 	def clone(self):
 		return CreatureCard(name = self.name,
 							cost = self.cost,
-							base_power = self.base_power,
-							base_health = self.base_health,
+							base_power = self._base_power,
+							base_max_health = self._base_max_health,
 							begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
 							attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
 							passive_fns = copy.deepcopy(self.passive_fns))
@@ -727,12 +840,12 @@ class Board:
 				for cell_coord in cell_coords:
 					self.red_mana[cell_coord] += amount
 
-	def buff_creatures_in_range(self, power, health, pos, distance=1):
+	def buff_creatures_in_range(self, power, max_health, pos, distance=1):
 		if pos:
 			cell_coords = self.grid.get_cells_by_distance(pos, distance)
 			for cell_coord in cell_coords:
 				if isinstance(self.cards[cell_coord], CreatureCard):
-					self.cards[cell_coord].apply_buff(power=1,health=1)
+					self.cards[cell_coord].apply_buff(power=1,max_health=1)
 
 	def do_passive(self):
 		for _, card in np.ndenumerate(self.cards):
@@ -793,8 +906,8 @@ game = Game()
 
 potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.change_health(1, self.owner)])
 mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 2)])
-goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_health=2)
-morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,health=1,pos=self.pos,distance=2)])
+goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
+morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,max_health=1,pos=self.pos,distance=2)])
 
 board = Board(grid_count)
 
@@ -829,6 +942,10 @@ while True:
 				hand.add_card(morale_card_prototype)
 			elif event.key == pg.K_DELETE:
 				hand.clear_hand()
+			elif event.key == pg.K_f:
+				for _, card in np.ndenumerate(board.cards):
+					if isinstance(card, CreatureCard):
+						card.change_health(-1)
 
 	game_clock.tick(60)
 	screen.fill(black)
