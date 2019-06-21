@@ -1,4 +1,7 @@
-import sys, os, copy, collections, traceback
+import sys, os, copy, traceback, inspect
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+from collections import namedtuple
+from typing import NamedTuple, Any
 from enum import Enum, auto, IntEnum
 import pygame as pg
 from pygame.math import Vector2 as Vec
@@ -226,7 +229,9 @@ def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0
 hand_card_size = (100,160)
 board_card_size = (56,90)
 
-CreatureStats = collections.namedtuple('CreatureStats', 'power max_health')
+CreatureStats = namedtuple('CreatureStats', 'power max_health')
+
+print_callstack = traceback.print_stack
 
 class Card:
 	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
@@ -319,20 +324,20 @@ class Card:
 		self.buffs = []
 		self.dirty = True
 
-	def do_passive(self):
+	def do_passive(self, field):
 		if self.active:
 			for fn in self.passive_fns:
-				fn(self)
+				fn(self, field)
 
-	def do_begin_phase(self):
+	def do_begin_phase(self, field):
 		if self.active:
 			for fn in self.begin_phase_fns:
-				fn(self)
+				fn(self, field)
 
-	def do_attack_phase(self):
+	def do_attack_phase(self, field):
 		if self.active:
 			for fn in self.attack_phase_fns:
-				fn(self)
+				fn(self, field)
 
 
 
@@ -500,9 +505,6 @@ class CreatureCard(Card):
 	def clear_buffs(self):
 		Card.clear_buffs(self)
 		self.health_bar.max_health = self.max_health
-
-	def do_attack_phase(self):
-		Card.do_attack_phase(self)
 		# if board.check_if_card_is_front(self.pos) == True:
 		# 	game.change_health(-self.power, self.enemy)
 
@@ -517,59 +519,25 @@ class CreatureCard(Card):
 
 class CardPool:
 	def __init__(self):
-		self.names = ['null']
-		self.surfaces = [None]
-		self.cards = [None]
+		self.cards = []
 
-		self.invalid_surface = node_font.render('?', True, red)
-		self.invalid_card = Card([])
+	def add_card(self, card):
+		if card in self.cards:
+			print("Tried to add card to card pool with same name as one already in pool. Card not added.")
+			return {'success': False}
 
-	def add_card(self, name, surface, card):
-		result = self.get_id_by_name(name)
-		if result['exists'] == True:
-			print("Tried to add item to item pool with duplicate name. Item not added.")
-			return {'success': False, 'ID': None}
-
-		self.names.append(name)
-		self.surfaces.append(surface)
 		self.cards.append(card)
+		return {'success': True}
 
-		return {'success': True, 'ID': len(self.names)-1}
-
-	def card_exists(self, ID):
-		if ID < len(self.names) and ID > 0: # Don't include 'null' item as a valid item (ID > 0)
-			return True
-		else:
-			return False
-
-	def get_card_by_id(self, ID):
-		if self.card_exists(ID):
-			return self.cards[ID]
-		else:
-			return self.invalid_card
-
-	def get_surface_by_id(self, ID):
-		if self.card_exists(ID):
-			return self.surfaces[ID]
-		else:
-			return self.invalid_surface
-
-	def get_id_by_name(self, name):
-		for i, item_name in enumerate(self.names):
-			if item_name == name and item_name != 'null': # Don't include 'null' item as an item
-				return {'exists': True, 'ID': i}
-
-		return {'exists': False, 'ID': None}
-
-	def get_name_by_id(self, ID):
-		if self.card_exists(ID):
-			return {'exists:': True, 'name': self.names[ID]}
-		else:
-			print("Tried to reference card with non-existent name or null card.")
-			return {'exists': False, 'name': None}
+	def get_card_by_name(self, name):
+		for card in self.cards:
+			if card.name == name:
+				return card
 
 class Hand:
-	def __init__(self):
+	def __init__(self, field):
+		self.field = field
+
 		self.cards = []
 
 		self.origin = Vec(10,620)
@@ -578,15 +546,13 @@ class Hand:
 		self.drag_card = None
 		self.card_grab_point = None
 
-	def add_card(self, card, count=1):
-		if not isinstance(card, Card):
-			print("Tried to add card to hand that wasn't Card or a subclass.")
-			return
-		if count <= 0:
-			return
-
-		for i in range(count):
-			self.cards.append(card.clone())
+	def add_card(self, name, count=1):
+		card = game.card_pool.get_card_by_name(name)
+		if card:
+			for _ in range(count):
+				self.cards.append(card.clone())
+		else:
+			print("Tried to add non-existent card to hand.")
 
 	def clear_hand(self):
 		self.cards = []
@@ -610,11 +576,11 @@ class Hand:
 		if self.drag_card:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
-			result = board.grid.get_cell_at_mouse()
+			result = self.field.board.grid.get_cell_at_mouse()
 			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
 				pos = result['pos']
-				if board.cards[pos] == None:
-					placed_in_board = board.place_card(result['pos'], self.drag_card)
+				if self.field.board.cards[pos] == None:
+					placed_in_board = self.field.board.place_card(result['pos'], self.drag_card)
 			
 			if placed_in_board == False:
 				self.cards.append(self.drag_card)
@@ -631,11 +597,11 @@ class Hand:
 		if self.drag_card:
 			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
 
-			result = board.grid.get_cell_at_mouse()
+			result = self.field.board.grid.get_cell_at_mouse()
 			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
 				pos = result['pos']
-				if board.cards[pos] == None:
-					cell_top_left = board.grid.get_cell_pos(result['pos'], align=('center','top'))
+				if self.field.board.cards[pos] == None:
+					cell_top_left = self.field.board.grid.get_cell_pos(result['pos'], align=('center','top'))
 					cell_top_left[0] -= board_card_size[0]//2
 					self.drag_card.draw(cell_top_left, "board_hover")
 					drawn_in_board = True
@@ -692,8 +658,79 @@ class TurnDisplay:
 	def draw(self, pos, align):
 		draw_surface_aligned(target=screen, source=self.phase_text, pos=pos, align=align)
 
+# class GameState(Enum):
+# 	MainMenu = auto()
+# 	Field = auto()
+
+class InputMap:
+	def __init__(self, actions):
+		self.actions = actions
+	def map(self, input):
+		self.actions[input]
+
+Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
+
+class GameState:
+	def handle_input(self, input, mouse_pos):
+		state = None
+		if input in self.input_map:
+			state = self.input_map[input](mouse_pos)
+
+		return state
+	# These are 'virtual' methods -- should be overridden by child class
+	def draw(self):
+		raise NotImplementedError()
+
+class MainMenu(GameState):
+	def __init__(self):
+		self.input_map = {
+			Input(key=pg.K_SPACE, type='press'): self.start_game
+		}
+	def draw(self):
+		pg.draw.circle(screen, red, (100,100), 30)
+
+	def start_game(self, mouse_pos):
+		return Field()
+
+class Field(GameState):
+	def __init__(self):
+		self.board = Board(self, grid_count)
+		self.hand = Hand(self)
+		self.hand.add_card("Potion")
+		self.hand.add_card("Mountain", 3)
+		self.hand.add_card("Goblin", 2)
+		self.hand.add_card("Morale")
+
+		self.input_map = {
+			Input(mouse_button=1): lambda mouse_pos: self.hand.mouse_press(mouse_pos),
+			Input(mouse_button=1, type='release'): lambda mouse_pos: self.hand.mouse_release(mouse_pos),
+			Input(key=pg.K_SPACE): lambda mouse_pos: game.advance_turn(),
+			Input(key=pg.K_1): lambda mouse_pos: self.hand.add_card("Mountain"),
+			Input(key=pg.K_2): lambda mouse_pos: self.hand.add_card("Goblin"),
+			Input(key=pg.K_3): lambda mouse_pos: self.hand.add_card("Morale"),
+			Input(key=pg.K_DELETE): lambda mouse_pos: self.hand.clear_hand(),
+		}
+
+	def draw(self):
+		self.board.draw()
+		self.hand.draw()
+
+
 class Game:
 	def __init__(self):
+		self.card_pool = CardPool()
+
+		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: game.change_health(1, self.owner)])
+		mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self, field: field.board.add_mana(1, 'red', self.pos, 1)])
+		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
+		morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self, field: field.board.buff_creatures_in_range(power=1,max_health=1,pos=self.pos,distance=2)])
+
+		self.card_pool.add_card(potion_card_prototype)
+		self.card_pool.add_card(mountain_card_prototype)
+		self.card_pool.add_card(goblin_card_prototype)
+		self.card_pool.add_card(morale_card_prototype)
+
+
 		self.turn_display = TurnDisplay()
 
 		self._turn_number = 0
@@ -703,6 +740,8 @@ class Game:
 		self.player_healths = [20,20]
 		self.__refresh_hp_surfaces()
 		self.hp_text_offset = (10,0)
+
+		self.state = MainMenu()
 
 	def __refresh_turn_surface(self):
 		self.turn_text = ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
@@ -735,26 +774,45 @@ class Game:
 		self._phase_name = Phases[self._phase_number]
 		self.turn_display.set_active_phase(self._phase_name)
 
-	def advance_turn(self):
-		if self._phase_name == "Begin":
-			board.do_begin_phase()
-			self.__advance_phase()
-		elif self._phase_name == "Attack":
-			board.do_attack_phase()
-			self.__advance_phase()
-		elif self._phase_name == "End":
-			self._turn_number += 1
-			self.__start_turn()
+	@property
+	def board(self):
+		if isinstance(self.state, Field):
+			return self.state.board
 
-		self.__refresh_turn_surface()
+	def advance_turn(self):
+		if self.board:
+			if self._phase_name == "Begin":
+				self.board.do_begin_phase()
+				self.__advance_phase()
+			elif self._phase_name == "Attack":
+				self.board.do_attack_phase()
+				self.__advance_phase()
+			elif self._phase_name == "End":
+				self._turn_number += 1
+				self.__start_turn()
+
+			self.__refresh_turn_surface()
+
+	def handle_input(self, input, mouse_pos=None):
+		if input.key == pg.K_ESCAPE:
+			sys.exit()
+
+		state = self.state.handle_input(input, mouse_pos)
+		if state:
+			self.state = state
 
 	def draw(self):
-		self.turn_display.draw(board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
-		draw_surface_aligned(target=screen, source=self._bottom_hp_text, pos=board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
-		draw_surface_aligned(target=screen, source=self._top_hp_text, pos=board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
+		self.state.draw()
+
+		if isinstance(self.state, Field):
+			self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
+			draw_surface_aligned(target=screen, source=self._bottom_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
+			draw_surface_aligned(target=screen, source=self._top_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
 
 class Board:
-	def __init__(self, size):
+	def __init__(self, field, size):
+		self.field = field
+
 		self.size = size
 		self.cards = np.full(size, None, np.dtype(Card))
 		self.grid = Grid(dimensions=size, origin=(10,10), cell_size=node_size)
@@ -763,7 +821,7 @@ class Board:
 	def place_card(self, cell, card):
 		if self.grid.check_cell_valid(cell) == True:
 			card.pos = cell
-			card.owner = board.get_cell_owner(cell)
+			card.owner = self.get_cell_owner(cell)
 			self.cards[cell] = card
 			self._refresh_passives()
 
@@ -881,17 +939,17 @@ class Board:
 		#traceback.print_stack()
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
-				card.do_passive()
+				card.do_passive(self.field)
 
 	def do_begin_phase(self):
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
-				card.do_begin_phase()
+				card.do_begin_phase(self.field)
 
 	def do_attack_phase(self):
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
-				card.do_attack_phase()
+				card.do_attack_phase(self.field)
 
 		for lane in range(self.size[0]): # 0,1,...,4
 			front0_cell = self.get_frontmost_occupied_cell(0, lane)['cell']
@@ -909,8 +967,10 @@ class Board:
 			is_creature_1 = isinstance(card_1, CreatureCard)
 
 			if is_creature_0 and is_creature_1:
-				card_0.change_health(-card_1.power)
-				card_1.change_health(-card_0.power)
+				if card_0.active:
+					card_1.change_health(-card_0.power)
+				if card_1.active:
+					card_0.change_health(-card_1.power)
 
 				if card_0.health <= 0:
 					self.remove_card_from_board(front0_cell)
@@ -918,15 +978,17 @@ class Board:
 					self.remove_card_from_board(front1_cell)
 
 			if is_creature_0 and not is_creature_1:
-				if card_1:
-					self.remove_card_from_board(front1_cell)
-				else:
-					game.change_health(-card_0.power, 1)
+				if card_0.active:
+					if card_1:
+						self.remove_card_from_board(front1_cell)
+					else:
+						game.change_health(-card_0.power, 1)
 			if is_creature_1 and not is_creature_0:
-				if card_0:
-					self.remove_card_from_board(front0_cell)
-				else:
-					game.change_health(-card_1.power, 0)
+				if card_1.active:
+					if card_0:
+						self.remove_card_from_board(front0_cell)
+					else:
+						game.change_health(-card_1.power, 0)
 
 			if not is_creature_0 and not is_creature_1:
 				pass
@@ -949,6 +1011,13 @@ class Board:
 
 		self.grid.draw(grey)
 
+# Represents the maps between an input and an action
+Control = namedtuple('Control', 'input action')
+
+class Action(Enum):
+	Quit = auto()
+	AdvanceTurn = auto()
+
 icon_size = 36
 icon_padding = 10
 def draw_hand(pos):
@@ -970,57 +1039,33 @@ ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
 # Game setup
 game_clock = pg.time.Clock()
 
+input = Input()
 game = Game()
 # card_pool = CardPool()
-
-potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.change_health(1, self.owner)])
-mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 1)])
-goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
-morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,max_health=1,pos=self.pos,distance=2)])
-
-board = Board(grid_count)
-
-hand = Hand()
-hand.add_card(potion_card_prototype)
-hand.add_card(mountain_card_prototype, 3)
-hand.add_card(goblin_card_prototype, 2)
-hand.add_card(morale_card_prototype)
 
 while True:
 	for event in pg.event.get():
 		if event.type == pg.QUIT:
 			sys.exit()
 		elif event.type == pg.MOUSEBUTTONDOWN:
-			if event.button == 1:
-				hand.mouse_press(event.pos)
-			if event.button == 3:
-				board.right_mouse_press(event.pos)
+			input = Input(mouse_button=event.button, type='press')
+			game.handle_input(input, event.pos)
+			# if event.button == 1:
+				#hand.mouse_press(event.pos)
+			# if event.button == 3:
+				# board.right_mouse_press(event.pos)
 		elif event.type == pg.MOUSEBUTTONUP:
-			if event.button == 1:
-				hand.mouse_release(event.pos)
+			input = Input(mouse_button=event.button, type='release')	
+			game.handle_input(input, event.pos)
+			# if event.button == 1:
+				# hand.mouse_release(event.pos)
 		elif event.type == pg.KEYDOWN:
-			if event.key == pg.K_ESCAPE:
-				sys.exit()
-			elif event.key == pg.K_SPACE:
-				game.advance_turn()
-			elif event.key == pg.K_1:
-				hand.add_card(mountain_card_prototype)
-			elif event.key == pg.K_2:
-				hand.add_card(goblin_card_prototype)
-			elif event.key == pg.K_3:
-				hand.add_card(morale_card_prototype)
-			elif event.key == pg.K_DELETE:
-				hand.clear_hand()
-			elif event.key == pg.K_f:
-				for _, card in np.ndenumerate(board.cards):
-					if isinstance(card, CreatureCard):
-						card.change_health(-1)
+			input = Input(key=event.key, type='press')
+			game.handle_input(input)
 
 	game_clock.tick(60)
 	screen.fill(black)
 
-	board.draw()
-	hand.draw()
 	game.draw()
 
 	pg.display.flip()
