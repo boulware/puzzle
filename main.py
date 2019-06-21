@@ -334,6 +334,8 @@ class Card:
 			for fn in self.attack_phase_fns:
 				fn(self)
 
+
+
 	def draw(self, pos, location):
 		if location == "hand":
 			screen.blit(self.hand_surface, pos)
@@ -501,8 +503,8 @@ class CreatureCard(Card):
 
 	def do_attack_phase(self):
 		Card.do_attack_phase(self)
-		if board.check_if_card_is_front(self.pos) == True:
-			game.change_health(-self.power, self.enemy)
+		# if board.check_if_card_is_front(self.pos) == True:
+		# 	game.change_health(-self.power, self.enemy)
 
 	def clone(self):
 		return CreatureCard(name = self.name,
@@ -781,6 +783,12 @@ class Board:
 		else:
 			return False # No card returned
 
+	def remove_card_from_board(self, cell):
+		if self.cards[cell] != None:
+			self.cards[cell].owner = None
+			self.cards[cell] = None
+			self._refresh_passives()
+
 	def right_mouse_press(self, pos):
 		result = self.grid.get_cell_at_mouse()
 		if result['hit'] == True:
@@ -798,25 +806,34 @@ class Board:
 			print("Tried to get cell owner of invalid cell")
 			return None
 
+	def get_frontmost_occupied_cell(self, player, lane):
+		ranks = []
+		if player == 0:
+			ranks = range(3,6,1) #3,4,5
+		elif player == 1:
+			ranks = range(2,-1,-1) #2,1,0
+		else:
+			print("get_frontmost_occupied_cell got invalid player")
+			return {'error:': True}
 
-	def check_if_card_is_front(self, cell):
-		if self.grid.check_cell_valid(cell) == False:
-			print("check_if_card_is_front() got invalid cell")
-			return
+		for rank in ranks:
+			if self.cards[lane, rank] != None:
+				return {'error': False,
+						'cell': (lane, rank)}
 
-		owner = self.get_cell_owner(cell)
-		col = cell[0]
+		return {'error': False,
+				'cell': None} # There are no cards in the lane
 
-		if owner == 0:
-			for row in range(self.size[1]//2, cell[1]):
-				if self.cards[col,row] != None:
-					return False
-		elif owner == 1:
-			for row in range(self.size[1]//2, cell[1], -1):
-				if self.cards[col,row] != None:
-					return False
 
-		return True
+
+	# def check_if_card_is_front(self, cell):
+	# 	if self.grid.check_cell_valid(cell) == False:
+	# 		print("check_if_card_is_front() got invalid cell")
+	# 		return {'error': True}
+
+	# 	if self.get_frontmost_occupied_cell(
+	# 		return {'error': False,
+	# 				'result': True}
 
 	def _reset_mana(self):
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
@@ -876,6 +893,44 @@ class Board:
 			if card != None:
 				card.do_attack_phase()
 
+		for lane in range(self.size[0]): # 0,1,...,4
+			front0_cell = self.get_frontmost_occupied_cell(0, lane)['cell']
+			front1_cell = self.get_frontmost_occupied_cell(1, lane)['cell']
+
+			card_0 = None
+			card_1 = None
+
+			if front0_cell:
+				card_0 = self.cards[front0_cell]
+			if front1_cell:
+				card_1 = self.cards[front1_cell]
+
+			is_creature_0 = isinstance(card_0, CreatureCard)
+			is_creature_1 = isinstance(card_1, CreatureCard)
+
+			if is_creature_0 and is_creature_1:
+				card_0.change_health(-card_1.power)
+				card_1.change_health(-card_0.power)
+
+				if card_0.health <= 0:
+					self.remove_card_from_board(front0_cell)
+				if card_1.health <= 0:
+					self.remove_card_from_board(front1_cell)
+
+			if is_creature_0 and not is_creature_1:
+				if card_1:
+					self.remove_card_from_board(front1_cell)
+				else:
+					game.change_health(-card_0.power, 1)
+			if is_creature_1 and not is_creature_0:
+				if card_0:
+					self.remove_card_from_board(front0_cell)
+				else:
+					game.change_health(-card_1.power, 0)
+
+			if not is_creature_0 and not is_creature_1:
+				pass
+
 	def draw(self):
 		# Draw the cards in the board
 		for x in range(self.size[0]):
@@ -919,7 +974,7 @@ game = Game()
 # card_pool = CardPool()
 
 potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self: game.change_health(1, self.owner)])
-mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 2)])
+mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self: board.add_mana(1, 'red', self.pos, 1)])
 goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
 morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self: board.buff_creatures_in_range(power=1,max_health=1,pos=self.pos,distance=2)])
 
