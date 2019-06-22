@@ -791,8 +791,12 @@ class MainMenu(GameState):
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: sys.exit(),
 			Input(key=pg.K_UP): lambda mouse_pos: self.list_menu.move_cursor_up(),
 			Input(key=pg.K_w): lambda mouse_pos: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_LEFT): lambda mouse_pos: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_a): lambda mouse_pos: self.list_menu.move_cursor_up(),
 			Input(key=pg.K_DOWN): lambda mouse_pos: self.list_menu.move_cursor_down(),
 			Input(key=pg.K_s): lambda mouse_pos: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_RIGHT): lambda mouse_pos: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_d): lambda mouse_pos: self.list_menu.move_cursor_down(),
 		}
 
 
