@@ -688,9 +688,6 @@ class ListMenu:
 		self.selected_font = selected_font
 		self.selected = selected
 
-		self._generate_surface()
-
-
 	def _generate_surface(self):
 		# rects which delineate each menu item (for checking mouse hover, etc.)
 		self.item_rects = []
@@ -734,6 +731,25 @@ class ListMenu:
 
 			current_y += text_surface.get_height() + menu_item_spacing
 
+	@property
+	def selected(self):
+		return self._selected
+
+	@selected.setter
+	def selected(self, selected):
+		self._selected = selected
+		self._generate_surface()
+
+	def move_cursor_up(self):
+		self.selected -= 1
+		if self.selected < 0:
+			self.selected = len(self.items)-1
+
+	def move_cursor_down(self):
+		self.selected += 1
+		if self.selected >= len(self.items):
+			self.selected = 0
+
 	def get_selected_item(self):
 		return self.items[self.selected]
 
@@ -742,7 +758,6 @@ class ListMenu:
 		for i, item_rect in enumerate(self.item_rects):
 			if item_rect.collidepoint(mouse_pos):
 				self.selected = i
-				self._generate_surface()
 				return
 
 	def draw(self):
@@ -771,12 +786,17 @@ class MainMenu(GameState):
 	def __init__(self):
 		self.input_map = {
 			Input(key=pg.K_SPACE): lambda mouse_pos: self.select_menu_item(),
+			Input(key=pg.K_RETURN): lambda mouse_pos: self.select_menu_item(),
 			Input(mouse_button=1): lambda mouse_pos: self.select_menu_item(),
-			Input(key=pg.K_ESCAPE): lambda mouse_pos: sys.exit()
+			Input(key=pg.K_ESCAPE): lambda mouse_pos: sys.exit(),
+			Input(key=pg.K_UP): lambda mouse_pos: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_w): lambda mouse_pos: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_DOWN): lambda mouse_pos: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_s): lambda mouse_pos: self.list_menu.move_cursor_down(),
 		}
 
 
-		self.list_menu = ListMenu(	items=('Play', 'Exit'),
+		self.list_menu = ListMenu(	items=('Play', 'Options', 'Exit'),
 									pos=(screen_size[0]//2, screen_size[1]//2),
 									align=('center','center'),
 									text_align=('center'),
