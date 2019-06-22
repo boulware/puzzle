@@ -19,6 +19,7 @@ dark_red = (70,0,0)
 green = (0,255,0)
 blue = (0,0,255)
 dark_blue = (0,0,70)
+gold = (255,215,0)
 
 # Game parameters
 grid_count = (5,6)
@@ -212,19 +213,23 @@ class Grid:
 		draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
 
 def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0)):
-	new_pos = list(np.add(pos, offset))
+	align_offset = list(offset)
 
 	if align[0] == 'center':
-		new_pos[0] -= source.get_width()//2
+		align_offset[0] -= source.get_width()//2
 	elif align[0] == 'right':
-		new_pos[0] -= source.get_width()
+		align_offset[0] -= source.get_width()
 
 	if align[1] == 'center':
-		new_pos[1] -= source.get_height()//2
+		align_offset[1] -= source.get_height()//2
 	elif align[1] == 'down':
-		new_pos[1] -= source.get_height()
+		align_offset[1] -= source.get_height()
+
+	new_pos = list(np.add(pos,align_offset))
 
 	target.blit(source, new_pos)
+
+	return align_offset
 
 hand_card_size = (100,160)
 board_card_size = (56,90)
@@ -670,6 +675,85 @@ class InputMap:
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
+# number of pixels between each item in a menu
+menu_item_spacing = 4
+
+class ListMenu:
+	def __init__(self, items, pos, align, text_align, font, selected_font, selected=0):
+		self.items = items
+		self.pos = pos
+		self.align = align
+		self.text_align = text_align
+		self.font = font
+		self.selected_font = selected_font
+		self.selected = selected
+
+		self._generate_surface()
+
+
+	def _generate_surface(self):
+		# rects which delineate each menu item (for checking mouse hover, etc.)
+		self.item_rects = []
+
+		total_height = 0
+		max_width = 0
+		for i, item in enumerate(self.items):
+			if i == self.selected:
+				text_size = self.selected_font.size(item)
+			else:
+				text_size = self.font.size(item)
+
+			total_height += text_size[1]
+			max_width = max(max_width, text_size[0])
+
+		total_height += line_spacing*(len(self.items)-1)
+
+		self.surface = pg.Surface((max_width, total_height))
+		current_y = 0 # The y value where the next menu item should be drawn
+		for i, item in enumerate(self.items):
+			if i == self.selected:
+				text_surface = self.selected_font.render(item, True, gold)
+			else:
+				text_surface = self.font.render(item, True, light_grey)
+			item_pos = (0,0)
+			if self.text_align == 'center':
+				item_pos = (self.surface.get_width()//2,current_y)
+			elif self.text_align == 'left':
+				item_pos = (0,current_y)
+			elif self.text_align == 'right':
+				item_pos = (self.surface.get_width()-1, current_y)
+
+			align_offset = draw_surface_aligned(	target=self.surface, 
+													source=text_surface,
+													pos=item_pos,
+													align=(self.text_align,'top'))
+
+			# Not align-friendly (only works with center)
+			item_rect = pg.Rect((self.pos[0]-self.surface.get_width()//2, self.pos[1]-self.surface.get_height()//2+current_y-menu_item_spacing//2), (self.surface.get_width(), text_surface.get_height()+menu_item_spacing))
+			self.item_rects.append(item_rect)
+
+			current_y += text_surface.get_height() + menu_item_spacing
+
+	def get_selected_item(self):
+		return self.items[self.selected]
+
+	def update(self, mouse_pos):
+		# TODO: Can probably be optimized by doing one check for the WHOLE self.surface first and then continuing if True
+		for i, item_rect in enumerate(self.item_rects):
+			if item_rect.collidepoint(mouse_pos):
+				self.selected = i
+				self._generate_surface()
+				return
+
+	def draw(self):
+		draw_surface_aligned(	target=screen,
+								source=self.surface,
+								pos=self.pos,
+								align=self.align)
+		# for item_rect in self.item_rects:
+		# 	pg.draw.rect(screen, green, item_rect, 1)
+
+
 class GameState:
 	def handle_input(self, input, mouse_pos):
 		state = None
@@ -677,6 +761,8 @@ class GameState:
 			state = self.input_map[input](mouse_pos)
 
 		return state
+	def update(self, mouse_pos):
+		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
 	def draw(self):
 		raise NotImplementedError()
@@ -684,13 +770,31 @@ class GameState:
 class MainMenu(GameState):
 	def __init__(self):
 		self.input_map = {
-			Input(key=pg.K_SPACE, type='press'): self.start_game
+			Input(key=pg.K_SPACE): lambda mouse_pos: self.select_menu_item(),
+			Input(mouse_button=1): lambda mouse_pos: self.select_menu_item(),
+			Input(key=pg.K_ESCAPE): lambda mouse_pos: sys.exit()
 		}
-	def draw(self):
-		pg.draw.circle(screen, red, (100,100), 30)
 
-	def start_game(self, mouse_pos):
-		return Field()
+
+		self.list_menu = ListMenu(	items=('Play', 'Exit'),
+									pos=(screen_size[0]//2, screen_size[1]//2),
+									align=('center','center'),
+									text_align=('center'),
+									font=main_menu_font,
+									selected_font=main_menu_selected_font)
+
+	def update(self, mouse_pos):
+		self.list_menu.update(mouse_pos)
+
+	def draw(self):
+		self.list_menu.draw()
+
+	def select_menu_item(self):
+		selected = self.list_menu.get_selected_item()
+		if selected == 'Play':
+			return Field()
+		elif selected == 'Exit':
+			sys.exit()
 
 class Field(GameState):
 	def __init__(self):
@@ -709,7 +813,14 @@ class Field(GameState):
 			Input(key=pg.K_2): lambda mouse_pos: self.hand.add_card("Goblin"),
 			Input(key=pg.K_3): lambda mouse_pos: self.hand.add_card("Morale"),
 			Input(key=pg.K_DELETE): lambda mouse_pos: self.hand.clear_hand(),
+			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu(),
 		}
+
+	def go_to_main_menu(self):
+		return MainMenu()
+
+	def update(self, mouse_pos):
+		pass
 
 	def draw(self):
 		self.board.draw()
@@ -779,6 +890,7 @@ class Game:
 		if isinstance(self.state, Field):
 			return self.state.board
 
+	# TODO: Move this to Field (probably)
 	def advance_turn(self):
 		if self.board:
 			if self._phase_name == "Begin":
@@ -794,12 +906,12 @@ class Game:
 			self.__refresh_turn_surface()
 
 	def handle_input(self, input, mouse_pos=None):
-		if input.key == pg.K_ESCAPE:
-			sys.exit()
-
 		state = self.state.handle_input(input, mouse_pos)
 		if state:
 			self.state = state
+
+	def update(self, mouse_pos):
+		self.state.update(mouse_pos)
 
 	def draw(self):
 		self.state.draw()
@@ -808,6 +920,7 @@ class Game:
 			self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
 			draw_surface_aligned(target=screen, source=self._bottom_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
 			draw_surface_aligned(target=screen, source=self._top_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
+
 
 class Board:
 	def __init__(self, field, size):
@@ -1014,10 +1127,6 @@ class Board:
 # Represents the maps between an input and an action
 Control = namedtuple('Control', 'input action')
 
-class Action(Enum):
-	Quit = auto()
-	AdvanceTurn = auto()
-
 icon_size = 36
 icon_padding = 10
 def draw_hand(pos):
@@ -1028,13 +1137,16 @@ def draw_hand(pos):
 # Pygame setup
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
 pg.init()
-screen = pg.display.set_mode((700,800))
+screen_size = (700,800)
+screen = pg.display.set_mode(screen_size)
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
 card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
 card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
 node_font = pg.font.Font("Montserrat-Regular.ttf", 26)
 count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
 ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
+main_menu_font = pg.font.Font("Montserrat-Regular.ttf", 48)
+main_menu_selected_font = pg.font.Font("Montserrat-Regular.ttf", 60)
 
 # Game setup
 game_clock = pg.time.Clock()
@@ -1062,6 +1174,8 @@ while True:
 		elif event.type == pg.KEYDOWN:
 			input = Input(key=event.key, type='press')
 			game.handle_input(input)
+
+	game.update(pg.mouse.get_pos())
 
 	game_clock.tick(60)
 	screen.fill(black)
