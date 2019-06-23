@@ -1,4 +1,4 @@
-import sys, os, copy, traceback, inspect
+import sys, os, copy, traceback, inspect, socket
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 from collections import namedtuple
 from typing import NamedTuple, Any
@@ -557,6 +557,7 @@ class Hand:
 			for _ in range(count):
 				self.cards.append(card.clone())
 		else:
+			print_stack()
 			print("Tried to add non-existent card to hand.")
 
 	def clear_hand(self):
@@ -675,17 +676,162 @@ class InputMap:
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
-# number of pixels between each item in a menu
-menu_item_spacing = 4
+class TextEntry:
+	def __init__(	self,
+					pos, width, align, text_align, font,
+					text_cursor_scale=0.75, cursor_blink_time=750,
+					padding=(5,0),
+					default_text='160.2.8.117'):
+		self.pos = pos
+		self.width = width
+		self.align = align
+		self.text_align = text_align
+		self.font = font
+		self.text_cursor_scale = text_cursor_scale
+		self.padding = padding
+		self.text = default_text
+
+		self.height = self._calculate_height()
+		self.size = (self.width, self.height)
+
+		self.char_positions = []
+		self._calculate_char_positions()
+
+		self.rect = pg.Rect(pos,self.size)
+
+		self.selected = True
+		self.cursor_pos = 0
+		self.cursor_blink_time = cursor_blink_time
+		self.cursor_timer = 0
+		self.cursor_visible = True
+
+		self._generate_surfaces()
+
+	def _calculate_char_positions(self, pos=None):
+		char_positions = []
+		if pos == None: # Then recalculate the whole string
+			for i in range(0, len(self.text)+1):
+				sub_string = self.text[0:i]
+				sub_string_width, _ = self.font.size(sub_string)
+				char_positions.append(sub_string_width)
+		elif pos >= 0:
+			char_positions = self.char_positions[:pos]
+			for i in range(pos, len(self.text)+1):
+				sub_string = self.text[0:i]
+				sub_string_width, _ = self.font.size(sub_string)
+				char_positions.append(sub_string_width)
+
+		self.char_positions = char_positions
+
+	def _calculate_height(self):
+		test_string = ''
+		for i in range(32,127):
+			test_string += chr(i) # String containing all 'printable' ASCII characters (that we care about)
+
+		return self.font.size(test_string)[1]
+
+	def _generate_surfaces(self):
+		self._generate_box_surface()
+		self._generate_text_surface()
+
+	def _generate_box_surface(self):
+		self.box_surface = pg.Surface(self.size)
+
+		pg.draw.rect(self.box_surface, dark_grey, ((0,0),self.size))
+		pg.draw.rect(self.box_surface, white, ((0,0),self.size), 1)
+
+	def _generate_text_surface(self):
+		self.text_surface = self.font.render(self.text, True, red)		
+
+	@property
+	def cursor_pos(self):
+		return self._cursor_pos
+
+	@cursor_pos.setter
+	def cursor_pos(self, cursor_pos):
+		if cursor_pos < 0:
+			cursor_pos = 0
+		elif cursor_pos > len(self.text):
+			cursor_pos = len(self.text)
+
+		self._cursor_pos = cursor_pos
+		self.cursor_visible = True
+		self.cursor_timer = 0
+	
+
+	def keypress(self, key):
+		if key in range(32,127): # a normal 'printable' character
+			self.text = self.text[:self.cursor_pos] + chr(key) + self.text[self.cursor_pos:]
+			self.cursor_pos += 1
+			self._calculate_char_positions(pos = self.cursor_pos-1)
+			self._generate_text_surface()
+		elif key == pg.K_LEFT:
+			self.cursor_pos -= 1
+		elif key == pg.K_RIGHT:
+			self.cursor_pos += 1
+		elif key == pg.K_BACKSPACE:
+			self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
+			self.cursor_pos -= 1
+			self._calculate_char_positions(pos=self.cursor_pos)
+			self._generate_text_surface()
+		elif key == pg.K_DELETE:
+			self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos+1:]
+			self._calculate_char_positions(pos=self.cursor_pos)
+			self._generate_text_surface()
+
+	def left_click(self, mouse_pos):
+		if self.rect.collidepoint(mouse_pos):
+			self.selected = True
+			self.cursor_visible = True
+			self.cursor_timer = 0
+		else:
+			self.selected = False
+
+	def check_mouse_inside(self, mouse_pos):
+		if self.rect.collidepoint(mouse_pos):
+			return True
+		else:
+			return False
+
+	def update(self, dt, mouse_pos):
+		if self.selected:
+			self.cursor_timer += dt
+			if self.cursor_timer >= self.cursor_blink_time:
+				self.cursor_timer -= self.cursor_blink_time
+				self.cursor_visible = not self.cursor_visible
+
+	def _draw_cursor(self):
+		if self.cursor_visible:
+			x = self.rect.left + self.padding[0] + self.char_positions[self.cursor_pos]
+			y_padding = self.rect.height*(1 - self.text_cursor_scale)//2
+			pg.draw.line(screen, white, (x,self.rect.top+y_padding), (x,self.rect.bottom-y_padding))
+
+	def _draw_text(self):
+		# Ignores self.text_align for now
+		screen.blit(self.text_surface, (self.rect.left+self.padding[0], self.rect.top+self.padding[1]))
+
+	def draw(self):
+		draw_surface_aligned(	target=screen,
+								source=self.box_surface,
+								pos=self.pos,
+								align=self.align)
+
+		self._draw_text()
+
+		if self.selected:
+			self._draw_cursor()
+
+
 
 class ListMenu:
-	def __init__(self, items, pos, align, text_align, font, selected_font, selected=0):
+	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0):
 		self.items = items
 		self.pos = pos
 		self.align = align
 		self.text_align = text_align
 		self.font = font
 		self.selected_font = selected_font
+		self.item_spacing = item_spacing
 		self.selected = selected
 
 	def _generate_surface(self):
@@ -706,6 +852,9 @@ class ListMenu:
 		total_height += line_spacing*(len(self.items)-1)
 
 		self.surface = pg.Surface((max_width, total_height))
+		# TODO: Only functions with align=center (I think)
+		self.rect = pg.Rect((self.pos[0]-max_width//2, self.pos[1]-total_height//2),(max_width,total_height))
+
 		current_y = 0 # The y value where the next menu item should be drawn
 		for i, item in enumerate(self.items):
 			if i == self.selected:
@@ -726,10 +875,10 @@ class ListMenu:
 													align=(self.text_align,'top'))
 
 			# Not align-friendly (only works with center)
-			item_rect = pg.Rect((self.pos[0]-self.surface.get_width()//2, self.pos[1]-self.surface.get_height()//2+current_y-menu_item_spacing//2), (self.surface.get_width(), text_surface.get_height()+menu_item_spacing))
+			item_rect = pg.Rect((self.pos[0]-self.surface.get_width()//2, self.pos[1]-self.surface.get_height()//2+current_y-self.item_spacing//2), (self.surface.get_width(), text_surface.get_height()+self.item_spacing))
 			self.item_rects.append(item_rect)
 
-			current_y += text_surface.get_height() + menu_item_spacing
+			current_y += text_surface.get_height() + self.item_spacing
 
 	@property
 	def selected(self):
@@ -753,7 +902,17 @@ class ListMenu:
 	def get_selected_item(self):
 		return self.items[self.selected]
 
-	def update(self, mouse_pos):
+	# Menu items can be selected but not hovered. Sometimes, when clicking,
+	# you may not want to activate the item unless it's still being hovered
+	# (i.e., the mouse is still over the menu element)
+	def check_mouse_inside(self, mouse_pos):
+		if self.rect.collidepoint(mouse_pos):
+			return True
+		else:
+			return False
+
+
+	def update(self, dt, mouse_pos):
 		# TODO: Can probably be optimized by doing one check for the WHOLE self.surface first and then continuing if True
 		for i, item_rect in enumerate(self.item_rects):
 			if item_rect.collidepoint(mouse_pos):
@@ -775,8 +934,12 @@ class GameState:
 		if input in self.input_map:
 			state = self.input_map[input](mouse_pos)
 
-		return state
-	def update(self, mouse_pos):
+		if state != None:
+			return state 	# if we have a state change, go ahead and return,
+		else:				# but if not, let's check the 'any key' event:
+			if input.key:
+				state = self.input_map[Input(key='any')](input.key)
+	def update(self, dt, mouse_pos):
 		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
 	def draw(self):
@@ -785,40 +948,71 @@ class GameState:
 class MainMenu(GameState):
 	def __init__(self):
 		self.input_map = {
-			Input(key=pg.K_SPACE): lambda mouse_pos: self.select_menu_item(),
-			Input(key=pg.K_RETURN): lambda mouse_pos: self.select_menu_item(),
-			Input(mouse_button=1): lambda mouse_pos: self.select_menu_item(),
-			Input(key=pg.K_ESCAPE): lambda mouse_pos: sys.exit(),
-			Input(key=pg.K_UP): lambda mouse_pos: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_w): lambda mouse_pos: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_LEFT): lambda mouse_pos: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_a): lambda mouse_pos: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_DOWN): lambda mouse_pos: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_s): lambda mouse_pos: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_RIGHT): lambda mouse_pos: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_d): lambda mouse_pos: self.list_menu.move_cursor_down(),
+			Input(key='any'): lambda key_code: self.any_key_pressed(key_code),
+			Input(key=pg.K_SPACE): lambda _: self.keyboard_select_menu_item(),
+			Input(key=pg.K_RETURN): lambda _: self.keyboard_select_menu_item(),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
+			Input(key=pg.K_ESCAPE): lambda _: sys.exit(),
+			Input(key=pg.K_UP): lambda _: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_w): lambda _: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_LEFT): lambda _: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_a): lambda _: self.list_menu.move_cursor_up(),
+			Input(key=pg.K_DOWN): lambda _: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_s): lambda _: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_RIGHT): lambda _: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_d): lambda _: self.list_menu.move_cursor_down(),
 		}
 
 
-		self.list_menu = ListMenu(	items=('Play', 'Options', 'Exit'),
+		self.list_menu = ListMenu(	items=('Play', 'Connect', 'Exit'),
 									pos=(screen_size[0]//2, screen_size[1]//2),
 									align=('center','center'),
 									text_align=('center'),
 									font=main_menu_font,
 									selected_font=main_menu_selected_font)
 
-	def update(self, mouse_pos):
-		self.list_menu.update(mouse_pos)
+		self.text_entry = TextEntry(pos=(50,50),
+									width=200,
+									align=('left','top'),
+									text_align=('left','top'),
+									font=main_menu_font_med)
+
+	def update(self, dt, mouse_pos):
+		self.list_menu.update(dt, mouse_pos)
+		self.text_entry.update(dt, mouse_pos)
 
 	def draw(self):
 		self.list_menu.draw()
+		self.text_entry.draw()
 
-	def select_menu_item(self):
-		selected = self.list_menu.get_selected_item()
-		if selected == 'Play':
-			return Field()
-		elif selected == 'Exit':
-			sys.exit()
+	def any_key_pressed(self, key_code):
+		self.text_entry.keypress(key_code)
+
+	def left_mouse_press(self, mouse_pos):
+		if self.list_menu.check_mouse_inside(mouse_pos):
+			selected = self.list_menu.get_selected_item()
+			if selected == 'Play':
+				return Field()
+			elif selected == 'Exit':
+				sys.exit()
+
+		self.text_entry.left_click(mouse_pos)
+
+	def mouse_select_menu_item(self, mouse_pos):
+		if self.list_menu.check_mouse_inside(mouse_pos):
+			selected = self.list_menu.get_selected_item()
+			if selected == 'Play':
+				return Field()
+			elif selected == 'Exit':
+				sys.exit()
+
+	def keyboard_select_menu_item(self):
+			selected = self.list_menu.get_selected_item()
+			if selected == 'Play':
+				return Field()
+			elif selected == 'Exit':
+				sys.exit()
+
 
 class Field(GameState):
 	def __init__(self):
@@ -832,6 +1026,7 @@ class Field(GameState):
 		self.input_map = {
 			Input(mouse_button=1): lambda mouse_pos: self.hand.mouse_press(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.hand.mouse_release(mouse_pos),
+			Input(mouse_button=3): lambda mouse_pos: self.board.right_mouse_press(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: game.advance_turn(),
 			Input(key=pg.K_1): lambda mouse_pos: self.hand.add_card("Mountain"),
 			Input(key=pg.K_2): lambda mouse_pos: self.hand.add_card("Goblin"),
@@ -843,13 +1038,12 @@ class Field(GameState):
 	def go_to_main_menu(self):
 		return MainMenu()
 
-	def update(self, mouse_pos):
+	def update(self, dt, mouse_pos):
 		pass
 
 	def draw(self):
 		self.board.draw()
 		self.hand.draw()
-
 
 class Game:
 	def __init__(self):
@@ -934,8 +1128,8 @@ class Game:
 		if state:
 			self.state = state
 
-	def update(self, mouse_pos):
-		self.state.update(mouse_pos)
+	def update(self, dt, mouse_pos):
+		self.state.update(dt, mouse_pos)
 
 	def draw(self):
 		self.state.draw()
@@ -970,7 +1164,7 @@ class Board:
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
 			self.cards[cell].owner = None
-			hand.add_card(self.cards[cell])
+			self.field.hand.add_card(name=self.cards[cell].name)
 			self.cards[cell] = None
 			self._refresh_passives()
 
@@ -1149,18 +1343,12 @@ class Board:
 		self.grid.draw(grey)
 
 # Represents the maps between an input and an action
-Control = namedtuple('Control', 'input action')
-
-icon_size = 36
-icon_padding = 10
-def draw_hand(pos):
-	for index, item in enumerate(hand):
-		pg.draw.circle(screen, blue, (pos[0] + icon_size//2, pos[1] + icon_size//2 + (icon_size+icon_padding)*index), icon_size//2)
-		pg.draw.circle(screen, white, (pos[0] + icon_size//2, pos[1] + icon_size//2 + (icon_size+icon_padding)*index), icon_size//2, 2)
+#Control = namedtuple('Control', 'input action')
 
 # Pygame setup
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
 pg.init()
+pg.key.set_repeat(300, 40)
 screen_size = (700,800)
 screen = pg.display.set_mode(screen_size)
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
@@ -1170,6 +1358,7 @@ node_font = pg.font.Font("Montserrat-Regular.ttf", 26)
 count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
 ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
 main_menu_font = pg.font.Font("Montserrat-Regular.ttf", 48)
+main_menu_font_med = pg.font.Font("Montserrat-Regular.ttf", 32)
 main_menu_selected_font = pg.font.Font("Montserrat-Regular.ttf", 60)
 
 # Game setup
@@ -1177,7 +1366,6 @@ game_clock = pg.time.Clock()
 
 input = Input()
 game = Game()
-# card_pool = CardPool()
 
 while True:
 	for event in pg.event.get():
@@ -1186,22 +1374,19 @@ while True:
 		elif event.type == pg.MOUSEBUTTONDOWN:
 			input = Input(mouse_button=event.button, type='press')
 			game.handle_input(input, event.pos)
-			# if event.button == 1:
-				#hand.mouse_press(event.pos)
-			# if event.button == 3:
-				# board.right_mouse_press(event.pos)
 		elif event.type == pg.MOUSEBUTTONUP:
 			input = Input(mouse_button=event.button, type='release')	
 			game.handle_input(input, event.pos)
-			# if event.button == 1:
-				# hand.mouse_release(event.pos)
 		elif event.type == pg.KEYDOWN:
 			input = Input(key=event.key, type='press')
 			game.handle_input(input)
 
-	game.update(pg.mouse.get_pos())
+	# Update
+	dt = game_clock.tick(60)
 
-	game_clock.tick(60)
+	game.update(dt, pg.mouse.get_pos())
+
+	# Draw
 	screen.fill(black)
 
 	game.draw()

@@ -1,2 +1,1 @@
 1) Change the representation of the grid and game pieces from a 2D array with mostly empty squares to a list of each cell that has a piece?
-2) 
