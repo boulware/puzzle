@@ -678,18 +678,30 @@ Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'
 
 class TextEntry:
 	def __init__(	self,
-					pos, width, align, text_align, font,
+					pos, font,
+					align=('left','top'), text_align=None,
+					width=None,
+					type='ip',
+					label = '',
 					text_cursor_scale=0.75, cursor_blink_time=750,
 					padding=(5,0),
 					default_text='160.2.8.117'):
 		self.pos = pos
 		self.width = width
+		self.type = type
 		self.align = align
 		self.text_align = text_align
 		self.font = font
 		self.text_cursor_scale = text_cursor_scale
 		self.padding = padding
 		self.text = default_text
+		self.label = label
+
+		if self.width == None:
+			if self.type == 'ip':
+				self.width = self.font.size('000.000.000.000')[0] + self.padding[0]*2
+			else:
+				self.width = 200
 
 		self.height = self._calculate_height()
 		self.size = (self.width, self.height)
@@ -732,6 +744,7 @@ class TextEntry:
 
 	def _generate_surfaces(self):
 		self._generate_box_surface()
+		self._generate_label_surface()
 		self._generate_text_surface()
 
 	def _generate_box_surface(self):
@@ -740,8 +753,11 @@ class TextEntry:
 		pg.draw.rect(self.box_surface, dark_grey, ((0,0),self.size))
 		pg.draw.rect(self.box_surface, white, ((0,0),self.size), 1)
 
+	def _generate_label_surface(self):
+		self.label_surface = self.font.render(self.label, True, grey)
+
 	def _generate_text_surface(self):
-		self.text_surface = self.font.render(self.text, True, red)		
+		self.text_surface = self.font.render(self.text, True, light_grey)
 
 	@property
 	def cursor_pos(self):
@@ -759,21 +775,24 @@ class TextEntry:
 		self.cursor_timer = 0
 	
 
-	def keypress(self, key):
+	def keypress(self, key, unicode_key):
+
 		if key in range(32,127): # a normal 'printable' character
-			self.text = self.text[:self.cursor_pos] + chr(key) + self.text[self.cursor_pos:]
+			self.text = self.text[:self.cursor_pos] + unicode_key + self.text[self.cursor_pos:]
 			self.cursor_pos += 1
 			self._calculate_char_positions(pos = self.cursor_pos-1)
 			self._generate_text_surface()
-		elif key == pg.K_LEFT:
+
+		if key == pg.K_LEFT:
 			self.cursor_pos -= 1
 		elif key == pg.K_RIGHT:
 			self.cursor_pos += 1
 		elif key == pg.K_BACKSPACE:
-			self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
-			self.cursor_pos -= 1
-			self._calculate_char_positions(pos=self.cursor_pos)
-			self._generate_text_surface()
+			if self.cursor_pos > 0:
+				self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
+				self.cursor_pos -= 1
+				self._calculate_char_positions(pos=self.cursor_pos)
+				self._generate_text_surface()
 		elif key == pg.K_DELETE:
 			self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos+1:]
 			self._calculate_char_positions(pos=self.cursor_pos)
@@ -815,6 +834,11 @@ class TextEntry:
 								source=self.box_surface,
 								pos=self.pos,
 								align=self.align)
+
+		draw_surface_aligned(	target=screen,
+								source=self.label_surface,
+								pos=self.pos,
+								align=('left','down'))
 
 		self._draw_text()
 
@@ -929,7 +953,7 @@ class ListMenu:
 
 
 class GameState:
-	def handle_input(self, input, mouse_pos):
+	def handle_input(self, input, mouse_pos, unicode_key=None):
 		state = None
 		if input in self.input_map:
 			state = self.input_map[input](mouse_pos)
@@ -938,7 +962,7 @@ class GameState:
 			return state 	# if we have a state change, go ahead and return,
 		else:				# but if not, let's check the 'any key' event:
 			if input.key:
-				state = self.input_map[Input(key='any')](input.key)
+				state = self.input_map[Input(key='any')](input.key, unicode_key)
 	def update(self, dt, mouse_pos):
 		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
@@ -948,7 +972,7 @@ class GameState:
 class MainMenu(GameState):
 	def __init__(self):
 		self.input_map = {
-			Input(key='any'): lambda key_code: self.any_key_pressed(key_code),
+			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
 			Input(key=pg.K_SPACE): lambda _: self.keyboard_select_menu_item(),
 			Input(key=pg.K_RETURN): lambda _: self.keyboard_select_menu_item(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
@@ -960,7 +984,7 @@ class MainMenu(GameState):
 			Input(key=pg.K_DOWN): lambda _: self.list_menu.move_cursor_down(),
 			Input(key=pg.K_s): lambda _: self.list_menu.move_cursor_down(),
 			Input(key=pg.K_RIGHT): lambda _: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_d): lambda _: self.list_menu.move_cursor_down(),
+			Input(key=pg.K_d): lambda _: self.list_menu.move_cursor_down()
 		}
 
 
@@ -971,48 +995,58 @@ class MainMenu(GameState):
 									font=main_menu_font,
 									selected_font=main_menu_selected_font)
 
-		self.text_entry = TextEntry(pos=(50,50),
-									width=200,
-									align=('left','top'),
-									text_align=('left','top'),
-									font=main_menu_font_med)
-
 	def update(self, dt, mouse_pos):
 		self.list_menu.update(dt, mouse_pos)
-		self.text_entry.update(dt, mouse_pos)
 
 	def draw(self):
 		self.list_menu.draw()
-		self.text_entry.draw()
 
-	def any_key_pressed(self, key_code):
-		self.text_entry.keypress(key_code)
+	def any_key_pressed(self, key, unicode_key):
+		pass
+
+	def activate_menu(self):
+		selected = self.list_menu.get_selected_item()
+		if selected == 'Play':
+			return Field()
+		elif selected == 'Connect':
+			return ConnectMenu()
+		elif selected == 'Exit':
+			sys.exit()
 
 	def left_mouse_press(self, mouse_pos):
 		if self.list_menu.check_mouse_inside(mouse_pos):
-			selected = self.list_menu.get_selected_item()
-			if selected == 'Play':
-				return Field()
-			elif selected == 'Exit':
-				sys.exit()
-
-		self.text_entry.left_click(mouse_pos)
-
-	def mouse_select_menu_item(self, mouse_pos):
-		if self.list_menu.check_mouse_inside(mouse_pos):
-			selected = self.list_menu.get_selected_item()
-			if selected == 'Play':
-				return Field()
-			elif selected == 'Exit':
-				sys.exit()
+			return self.activate_menu()
 
 	def keyboard_select_menu_item(self):
-			selected = self.list_menu.get_selected_item()
-			if selected == 'Play':
-				return Field()
-			elif selected == 'Exit':
-				sys.exit()
+		return self.activate_menu()
 
+class ConnectMenu(GameState):
+	def __init__(self):
+		self.input_map = {
+			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
+			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos)
+		}
+
+		self.text_entry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2),
+									type='ip',
+									font=main_menu_font_med,
+									label='IP Address')
+
+	def any_key_pressed(self, key, unicode_key):
+		self.text_entry.keypress(key, unicode_key)
+
+	def left_mouse_press(self, mouse_pos):
+		self.text_entry.left_click(mouse_pos)
+
+	def cancel(self):
+		return MainMenu()
+
+	def update(self, dt, mouse_pos):
+		self.text_entry.update(dt, mouse_pos)
+
+	def draw(self):
+		self.text_entry.draw()
 
 class Field(GameState):
 	def __init__(self):
@@ -1024,6 +1058,7 @@ class Field(GameState):
 		self.hand.add_card("Morale")
 
 		self.input_map = {
+			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
 			Input(mouse_button=1): lambda mouse_pos: self.hand.mouse_press(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.hand.mouse_release(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.board.right_mouse_press(mouse_pos),
@@ -1034,6 +1069,9 @@ class Field(GameState):
 			Input(key=pg.K_DELETE): lambda mouse_pos: self.hand.clear_hand(),
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu(),
 		}
+
+	def any_key_pressed(self, key, unicode_key):
+		pass
 
 	def go_to_main_menu(self):
 		return MainMenu()
@@ -1123,8 +1161,8 @@ class Game:
 
 			self.__refresh_turn_surface()
 
-	def handle_input(self, input, mouse_pos=None):
-		state = self.state.handle_input(input, mouse_pos)
+	def handle_input(self, input, mouse_pos, unicode_key=None):
+		state = self.state.handle_input(input, mouse_pos, unicode_key)
 		if state:
 			self.state = state
 
@@ -1373,13 +1411,13 @@ while True:
 			sys.exit()
 		elif event.type == pg.MOUSEBUTTONDOWN:
 			input = Input(mouse_button=event.button, type='press')
-			game.handle_input(input, event.pos)
+			game.handle_input(input=input, mouse_pos=event.pos)
 		elif event.type == pg.MOUSEBUTTONUP:
 			input = Input(mouse_button=event.button, type='release')	
-			game.handle_input(input, event.pos)
+			game.handle_input(input=input, mouse_pos=event.pos)
 		elif event.type == pg.KEYDOWN:
 			input = Input(key=event.key, type='press')
-			game.handle_input(input)
+			game.handle_input(input=input, mouse_pos=pg.mouse.get_pos(), unicode_key=event.unicode)
 
 	# Update
 	dt = game_clock.tick(60)
