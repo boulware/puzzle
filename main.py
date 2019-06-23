@@ -805,6 +805,10 @@ class TextEntry:
 
 	def keypress(self, key, mod, unicode_key):
 		if key in range(32,127): # a normal 'printable' character
+			if self.selected_text_indices != None:
+				self.cursor_pos = self.selected_text_indices[0]
+				self.delete_selected()
+
 			self.text = self.text[:self.cursor_pos] + unicode_key + self.text[self.cursor_pos:]
 			self.cursor_pos += 1
 			self._calculate_char_positions(pos = self.cursor_pos-1)
