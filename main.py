@@ -705,11 +705,10 @@ class TextEntry:
 
 		self.height = self._calculate_height()
 		self.size = (self.width, self.height)
+		self.rect = pg.Rect(pos,self.size)
 
 		self.char_positions = []
 		self._calculate_char_positions()
-
-		self.rect = pg.Rect(pos,self.size)
 
 		self.selected = True
 		self.cursor_pos = 0
@@ -721,7 +720,7 @@ class TextEntry:
 
 	def _calculate_char_positions(self, pos=None):
 		char_positions = []
-		if pos == None: # Then recalculate the whole string
+		if pos == None: # Recalculate positions for the whole string
 			for i in range(0, len(self.text)+1):
 				sub_string = self.text[0:i]
 				sub_string_width, _ = self.font.size(sub_string)
@@ -733,7 +732,20 @@ class TextEntry:
 				sub_string_width, _ = self.font.size(sub_string)
 				char_positions.append(sub_string_width)
 
-		self.char_positions = char_positions
+		self.char_positions = char_positions # char_positions[n] is the position of the leftmost pixel of the nth character in the text
+		# TODO: Only update the ones past pos for center_positions
+		# positon_bounds[n] gives the range for when a click inside the textbox should place the cursor in the nth position (this range is between)
+		self.position_bounds = []
+		current_pos = 0
+		for consecutive_positions in zip(self.char_positions[:], self.char_positions[1:]):
+			char_center = (consecutive_positions[0]+consecutive_positions[1])//2 # Finds the center of the nth character
+			self.position_bounds.append((current_pos, char_center))
+			current_pos = char_center + 1
+
+		self.position_bounds.append((current_pos, self.rect.width))
+
+		# print(self.char_positions)
+		# print(list(zip(self.char_positions[:], self.char_positions[1:])))
 
 	def _calculate_height(self):
 		test_string = ''
@@ -801,6 +813,13 @@ class TextEntry:
 	def left_click(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
 			self.selected = True
+
+			# mouse position relative to the left side of the textbox
+			relative_x = mouse_pos[0] - self.rect.left - self.padding[0]
+			for i, position_bound in enumerate(self.position_bounds):
+				if relative_x >= position_bound[0] and relative_x < position_bound[1]:
+					self.cursor_pos = i
+
 			self.cursor_visible = True
 			self.cursor_timer = 0
 		else:
@@ -1025,13 +1044,17 @@ class ConnectMenu(GameState):
 		self.input_map = {
 			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos)
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
+			Input(key=pg.K_RETURN): lambda _: self.submit()
 		}
 
 		self.text_entry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2),
 									type='ip',
 									font=main_menu_font_med,
 									label='IP Address')
+
+	def submit(self):
+		print("(fake) Attempting to connect to %s" % self.text_entry.text)
 
 	def any_key_pressed(self, key, unicode_key):
 		self.text_entry.keypress(key, unicode_key)
