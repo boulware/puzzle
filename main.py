@@ -685,7 +685,7 @@ class TextEntry:
 					label = '',
 					text_cursor_scale=0.75, cursor_blink_time=750,
 					padding=(5,0),
-					default_text='160.2.8.117'):
+					default_text='123456789'):
 		self.pos = pos
 		self.width = width
 		self.type = type
@@ -706,6 +706,10 @@ class TextEntry:
 		self.height = self._calculate_height()
 		self.size = (self.width, self.height)
 		self.rect = pg.Rect(pos,self.size)
+
+		self.selected_text_indices = None
+		self.select_mode = False
+		self.select_start_index = None
 
 		self.char_positions = []
 		self._calculate_char_positions()
@@ -786,9 +790,20 @@ class TextEntry:
 		self.cursor_visible = True
 		self.cursor_timer = 0
 	
+	# unselect text and place cursor at cursor_pos
+	def _unselect(self, cursor_pos):
+		self.cursor_pos = cursor_pos
+		self.select_mode = False
+		self.selected_text_indices = None
+		self.select_start_index = None
 
-	def keypress(self, key, unicode_key):
+	def delete_selected(self):
+		left = self.text[:self.selected_text_indices[0]] # left side of selected text
+		right = self.text[self.selected_text_indices[1]:] # right ..
+		self.text = left + right
+		self._unselect(cursor_pos = self.selected_text_indices[0])
 
+	def keypress(self, key, mod, unicode_key):
 		if key in range(32,127): # a normal 'printable' character
 			self.text = self.text[:self.cursor_pos] + unicode_key + self.text[self.cursor_pos:]
 			self.cursor_pos += 1
@@ -796,34 +811,104 @@ class TextEntry:
 			self._generate_text_surface()
 
 		if key == pg.K_LEFT:
-			self.cursor_pos -= 1
+			if self.cursor_pos == 0:
+				pass
+			elif mod == pg.KMOD_LSHIFT:
+				if self.selected_text_indices == None:
+					self.selected_text_indices = (self.cursor_pos-1, self.cursor_pos)
+				else:
+					if self.cursor_pos == self.selected_text_indices[0]:
+						self.selected_text_indices = (self.selected_text_indices[0]-1, self.selected_text_indices[1])
+					elif self.cursor_pos == self.selected_text_indices[1]:
+						self.selected_text_indices = (self.selected_text_indices[0], self.selected_text_indices[1]-1)
+					else:
+						print("cursor_pos is not equal to either selected_text_index. something went wrong.")
+
+					if self.selected_text_indices[0] == self.selected_text_indices[1]:
+						self.selected_text_indices = None
+					else:
+						self.selected_text_indices = sorted(self.selected_text_indices)
+
+				self.cursor_pos -= 1
+			elif self.selected_text_indices != None:
+				self._unselect(cursor_pos=self.selected_text_indices[0])
+			else:
+				self.cursor_pos -= 1
 		elif key == pg.K_RIGHT:
-			self.cursor_pos += 1
+			if self.cursor_pos == len(self.text):
+				pass
+			elif mod == pg.KMOD_LSHIFT:
+				if self.selected_text_indices == None:
+					self.selected_text_indices = (self.cursor_pos, self.cursor_pos+1)
+				else:
+					if self.cursor_pos == self.selected_text_indices[0]:
+						self.selected_text_indices = (self.selected_text_indices[0]+1, self.selected_text_indices[1])
+					elif self.cursor_pos == self.selected_text_indices[1]:
+						self.selected_text_indices = (self.selected_text_indices[0], self.selected_text_indices[1]+1)
+					else:
+						print("cursor_pos is not equal to either selected_text_index. something went wrong.")
+
+					if self.selected_text_indices[0] == self.selected_text_indices[1]:
+						self.selected_text_indices = None
+					else:
+						self.selected_text_indices = sorted(self.selected_text_indices)
+
+				self.cursor_pos += 1
+			elif self.selected_text_indices != None:
+				self._unselect(cursor_pos=self.selected_text_indices[0])
+			else:
+				self.cursor_pos += 1
 		elif key == pg.K_BACKSPACE:
-			if self.cursor_pos > 0:
+			if self.selected_text_indices != None:
+				self.delete_selected()
+			elif self.cursor_pos > 0:
 				self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
 				self.cursor_pos -= 1
-				self._calculate_char_positions(pos=self.cursor_pos)
-				self._generate_text_surface()
+
+			self._calculate_char_positions(pos=self.cursor_pos)
+			self._generate_text_surface()
 		elif key == pg.K_DELETE:
-			self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos+1:]
+			if self.selected_text_indices != None:
+				self.delete_selected()
+			elif self.cursor_pos < len(self.text):
+				self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos+1:]
+
 			self._calculate_char_positions(pos=self.cursor_pos)
 			self._generate_text_surface()
 
-	def left_click(self, mouse_pos):
+	# Returns where the cursor should be placed for the given mouse position
+	def mouse_pos_to_cursor_index(self, mouse_pos):
+		# mouse position relative to the left side of the textbox
+		relative_x = mouse_pos[0] - self.rect.left - self.padding[0]
+
+		for i, position_bound in enumerate(self.position_bounds):
+			#print('i=%d; position_bound=%s; mouse_pos=%s; relative_x=%s`'%(i, position_bound, mouse_pos, relative_x))
+			if i == 0: # valid between -inf up to the second position_bound
+				if relative_x <= position_bound[1]:
+					return i
+			elif i == len(self.position_bounds)-1: # valid between first position bound and +inf
+				if relative_x >= position_bound[0]:
+					return i
+			elif relative_x >= position_bound[0] and relative_x <= position_bound[1]:
+				return i
+
+	def left_mouse_pressed(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
 			self.selected = True
 
-			# mouse position relative to the left side of the textbox
-			relative_x = mouse_pos[0] - self.rect.left - self.padding[0]
-			for i, position_bound in enumerate(self.position_bounds):
-				if relative_x >= position_bound[0] and relative_x < position_bound[1]:
-					self.cursor_pos = i
+			self.cursor_pos = self.mouse_pos_to_cursor_index(mouse_pos)
 
+			self.select_start_index = self.cursor_pos
+			self.select_mode = True
 			self.cursor_visible = True
 			self.cursor_timer = 0
 		else:
 			self.selected = False
+
+
+	def left_mouse_released(self, mouse_pos):
+		self.select_mode = False
+		self.select_start_index = None
 
 	def check_mouse_inside(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
@@ -838,6 +923,15 @@ class TextEntry:
 				self.cursor_timer -= self.cursor_blink_time
 				self.cursor_visible = not self.cursor_visible
 
+			if self.select_mode == True:
+				mouse_index = self.mouse_pos_to_cursor_index(mouse_pos)
+				self.cursor_pos = mouse_index
+				if self.select_start_index != mouse_index:
+					self.selected_text_indices = tuple(sorted([mouse_index, self.select_start_index]))
+				else:
+					self.selected_text_indices = None
+
+
 	def _draw_cursor(self):
 		if self.cursor_visible:
 			x = self.rect.left + self.padding[0] + self.char_positions[self.cursor_pos]
@@ -847,6 +941,18 @@ class TextEntry:
 	def _draw_text(self):
 		# Ignores self.text_align for now
 		screen.blit(self.text_surface, (self.rect.left+self.padding[0], self.rect.top+self.padding[1]))
+		if self.selected_text_indices != None:
+			left_index = self.selected_text_indices[0]
+			right_index = self.selected_text_indices[1]
+			left = self.char_positions[left_index]
+			right = self.char_positions[right_index]
+			shifted_left = left + self.rect.left + self.padding[0]
+			shifted_right = right + self.rect.left + self.padding[0]
+
+			pg.draw.rect(screen, light_grey, ((shifted_left,self.rect.top),(shifted_right-shifted_left,self.rect.height)))
+			selected_text = self.text[left_index:right_index]
+			self.selected_text_surface = self.font.render(selected_text, True, black)
+			screen.blit(self.selected_text_surface, (shifted_left, self.rect.top))
 
 	def draw(self):
 		draw_surface_aligned(	target=screen,
@@ -863,8 +969,6 @@ class TextEntry:
 
 		if self.selected:
 			self._draw_cursor()
-
-
 
 class ListMenu:
 	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0):
@@ -972,7 +1076,7 @@ class ListMenu:
 
 
 class GameState:
-	def handle_input(self, input, mouse_pos, unicode_key=None):
+	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		state = None
 		if input in self.input_map:
 			state = self.input_map[input](mouse_pos)
@@ -981,7 +1085,7 @@ class GameState:
 			return state 	# if we have a state change, go ahead and return,
 		else:				# but if not, let's check the 'any key' event:
 			if input.key:
-				state = self.input_map[Input(key='any')](input.key, unicode_key)
+				state = self.input_map[Input(key='any')](input.key, mod, unicode_key)
 	def update(self, dt, mouse_pos):
 		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
@@ -991,7 +1095,7 @@ class GameState:
 class MainMenu(GameState):
 	def __init__(self):
 		self.input_map = {
-			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
+			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_SPACE): lambda _: self.keyboard_select_menu_item(),
 			Input(key=pg.K_RETURN): lambda _: self.keyboard_select_menu_item(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
@@ -1020,7 +1124,7 @@ class MainMenu(GameState):
 	def draw(self):
 		self.list_menu.draw()
 
-	def any_key_pressed(self, key, unicode_key):
+	def any_key_pressed(self, key, mod, unicode_key):
 		pass
 
 	def activate_menu(self):
@@ -1042,9 +1146,10 @@ class MainMenu(GameState):
 class ConnectMenu(GameState):
 	def __init__(self):
 		self.input_map = {
-			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
+			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
+			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(key=pg.K_RETURN): lambda _: self.submit()
 		}
 
@@ -1056,11 +1161,14 @@ class ConnectMenu(GameState):
 	def submit(self):
 		print("(fake) Attempting to connect to %s" % self.text_entry.text)
 
-	def any_key_pressed(self, key, unicode_key):
-		self.text_entry.keypress(key, unicode_key)
+	def any_key_pressed(self, key, mod, unicode_key):
+		self.text_entry.keypress(key, mod, unicode_key)
 
-	def left_mouse_press(self, mouse_pos):
-		self.text_entry.left_click(mouse_pos)
+	def left_mouse_pressed(self, mouse_pos):
+		self.text_entry.left_mouse_pressed(mouse_pos)
+
+	def left_mouse_released(self, mouse_pos):
+		self.text_entry.left_mouse_released(mouse_pos)
 
 	def cancel(self):
 		return MainMenu()
@@ -1081,7 +1189,7 @@ class Field(GameState):
 		self.hand.add_card("Morale")
 
 		self.input_map = {
-			Input(key='any'): lambda key, unicode_key: self.any_key_pressed(key, unicode_key),
+			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(mouse_button=1): lambda mouse_pos: self.hand.mouse_press(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.hand.mouse_release(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.board.right_mouse_press(mouse_pos),
@@ -1093,7 +1201,7 @@ class Field(GameState):
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu(),
 		}
 
-	def any_key_pressed(self, key, unicode_key):
+	def any_key_pressed(self, key, mod, unicode_key):
 		pass
 
 	def go_to_main_menu(self):
@@ -1184,8 +1292,8 @@ class Game:
 
 			self.__refresh_turn_surface()
 
-	def handle_input(self, input, mouse_pos, unicode_key=None):
-		state = self.state.handle_input(input, mouse_pos, unicode_key)
+	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
+		state = self.state.handle_input(input, mouse_pos, mod, unicode_key)
 		if state:
 			self.state = state
 
@@ -1440,7 +1548,7 @@ while True:
 			game.handle_input(input=input, mouse_pos=event.pos)
 		elif event.type == pg.KEYDOWN:
 			input = Input(key=event.key, type='press')
-			game.handle_input(input=input, mouse_pos=pg.mouse.get_pos(), unicode_key=event.unicode)
+			game.handle_input(input=input, mouse_pos=pg.mouse.get_pos(), mod=event.mod, unicode_key=event.unicode)
 
 	# Update
 	dt = game_clock.tick(60)
