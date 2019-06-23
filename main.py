@@ -859,7 +859,7 @@ class TextEntry:
 
 				self.cursor_pos += 1
 			elif self.selected_text_indices != None:
-				self._unselect(cursor_pos=self.selected_text_indices[0])
+				self._unselect(cursor_pos=self.selected_text_indices[1])
 			else:
 				self.cursor_pos += 1
 		elif key == pg.K_BACKSPACE:
