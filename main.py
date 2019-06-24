@@ -685,7 +685,7 @@ class TextEntry:
 					label = '',
 					text_cursor_scale=0.75, cursor_blink_time=750,
 					padding=(5,0),
-					default_text='123456789'):
+					default_text=''):
 		self.pos = pos
 		self.width = width
 		self.type = type
@@ -700,6 +700,8 @@ class TextEntry:
 		if self.width == None:
 			if self.type == 'ip':
 				self.width = self.font.size('000.000.000.000')[0] + self.padding[0]*2
+			elif self.type == 'port':
+				self.width = self.font.size('00000')[0] + self.padding[0]*2
 			else:
 				self.width = 200
 
@@ -714,7 +716,7 @@ class TextEntry:
 		self.char_positions = []
 		self._calculate_char_positions()
 
-		self.selected = True
+		self.selected = False
 		self.cursor_pos = 0
 		self.cursor_blink_time = cursor_blink_time
 		self.cursor_timer = 0
@@ -774,6 +776,7 @@ class TextEntry:
 
 	def _generate_text_surface(self):
 		self.text_surface = self.font.render(self.text, True, light_grey)
+		self.text_selected_surface = self.font.render(self.text, True, black)
 
 	@property
 	def cursor_pos(self):
@@ -804,6 +807,9 @@ class TextEntry:
 		self._unselect(cursor_pos = self.selected_text_indices[0])
 
 	def keypress(self, key, mod, unicode_key):
+		if self.selected == False:
+			return
+
 		if key in range(32,127): # a normal 'printable' character
 			if self.selected_text_indices != None:
 				self.cursor_pos = self.selected_text_indices[0]
@@ -953,10 +959,8 @@ class TextEntry:
 			shifted_left = left + self.rect.left + self.padding[0]
 			shifted_right = right + self.rect.left + self.padding[0]
 
-			pg.draw.rect(screen, light_grey, ((shifted_left,self.rect.top),(shifted_right-shifted_left,self.rect.height)))
-			selected_text = self.text[left_index:right_index]
-			self.selected_text_surface = self.font.render(selected_text, True, black)
-			screen.blit(self.selected_text_surface, (shifted_left, self.rect.top))
+			pg.draw.rect(screen, grey, ((shifted_left,self.rect.top),(shifted_right-shifted_left,self.rect.height)))
+			screen.blit(self.text_selected_surface, (shifted_left, self.rect.top), (left, 0, right, self.text_selected_surface.get_height()))
 
 	def draw(self):
 		draw_surface_aligned(	target=screen,
@@ -1157,31 +1161,47 @@ class ConnectMenu(GameState):
 			Input(key=pg.K_RETURN): lambda _: self.submit()
 		}
 
-		self.text_entry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2),
-									type='ip',
+		self.ui_elements = []
+
+		self.ip_textentry = TextEntry(	pos=(screen_size[0]//2-100,screen_size[1]//2),
+										type='ip',
+										font=main_menu_font_med,
+										label='IP Address')
+
+		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
+									type='port',
 									font=main_menu_font_med,
-									label='IP Address')
+									label='Port')
+
+		self.ui_elements.append(self.ip_textentry)
+		self.ui_elements.append(self.port_textentry)
+
 
 	def submit(self):
-		print("(fake) Attempting to connect to %s" % self.text_entry.text)
+		print("(fake) Attempting to connect to %s:%s" % (self.ip_textentry.text, self.port_textentry.text))
 
 	def any_key_pressed(self, key, mod, unicode_key):
-		self.text_entry.keypress(key, mod, unicode_key)
+		for element in self.ui_elements:
+			element.keypress(key, mod, unicode_key)
 
 	def left_mouse_pressed(self, mouse_pos):
-		self.text_entry.left_mouse_pressed(mouse_pos)
+		for element in self.ui_elements:
+			element.left_mouse_pressed(mouse_pos)
 
 	def left_mouse_released(self, mouse_pos):
-		self.text_entry.left_mouse_released(mouse_pos)
+		for element in self.ui_elements:
+			element.left_mouse_released(mouse_pos)
 
 	def cancel(self):
 		return MainMenu()
 
 	def update(self, dt, mouse_pos):
-		self.text_entry.update(dt, mouse_pos)
+		for element in self.ui_elements:
+			element.update(dt, mouse_pos)
 
 	def draw(self):
-		self.text_entry.draw()
+		for element in self.ui_elements:
+			element.draw()
 
 class Field(GameState):
 	def __init__(self):
@@ -1521,7 +1541,7 @@ class Board:
 # Pygame setup
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
 pg.init()
-pg.key.set_repeat(300, 40)
+pg.key.set_repeat(300, 30)
 screen_size = (700,800)
 screen = pg.display.set_mode(screen_size)
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
