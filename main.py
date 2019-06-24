@@ -344,11 +344,11 @@ class Card:
 			for fn in self.attack_phase_fns:
 				fn(self, field)
 
-
-
-	def draw(self, pos, location):
+	def draw(self, pos, location, hover=False):
 		if location == "hand":
 			screen.blit(self.hand_surface, pos)
+			if hover:
+				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
 		if location == "board" or location == "board_hover":
 			screen.blit(self.board_surface, pos)
 
@@ -540,16 +540,21 @@ class CardPool:
 				return card
 
 class Hand:
-	def __init__(self, field):
-		self.field = field
-
+	def __init__(self):
 		self.cards = []
 
-		self.origin = Vec(10,620)
-		self.card_spacing = 110
+	def __iter__(self):
+		return iter(self.cards)
 
-		self.drag_card = None
-		self.card_grab_point = None
+	def __getitem__(self, key):
+		if key < 0 or key >= self.card_count:
+			raise LookupError('Invalid hand index')
+
+		return self.cards[key]
+		
+	@property
+	def card_count(self):
+		return len(self.cards)
 
 	def add_card(self, name, count=1):
 		card = game.card_pool.get_card_by_name(name)
@@ -560,61 +565,11 @@ class Hand:
 			print_stack()
 			print("Tried to add non-existent card to hand.")
 
+	def pop_card(self, index):
+		return self.cards.pop(index)
+
 	def clear_hand(self):
 		self.cards = []
-
-	def mouse_press(self, pos):
-		mouse_x, mouse_y = pos[0], pos[1]
-		for i in range(len(self.cards)):
-			left_x = self.origin[0] + (self.card_spacing * i)
-			right_x = left_x + hand_card_size[0]
-			top_y = self.origin[1]
-			bottom_y = self.origin[1] + hand_card_size[1]
-
-			if mouse_x >= left_x and mouse_x <= right_x and mouse_y > top_y and mouse_y < bottom_y:
-				# Mouse click happened on a card (self.cards[i])
-				if not self.drag_card:
-					self.drag_card = self.cards.pop(i)
-					# self.drag_card_index = i
-					self.card_grab_point = Vec(mouse_x - left_x, mouse_y - top_y)
-
-	def mouse_release(self, pos):
-		if self.drag_card:
-			placed_in_board = False # True if card is placed onto the board during this mouse release
-
-			result = self.field.board.grid.get_cell_at_mouse()
-			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				pos = result['pos']
-				if self.field.board.cards[pos] == None:
-					placed_in_board = self.field.board.place_card(result['pos'], self.drag_card)
-			
-			if placed_in_board == False:
-				self.cards.append(self.drag_card)
-			
-			self.drag_card = None
-			self.card_grab_point = None # Probably not necessary 
-
-	def draw(self):
-		# Draw each card in the hand with horizontal spacing between them
-		for i, card in enumerate(self.cards):
-			card.draw(self.origin + Vec(i*self.card_spacing,0), "hand")
-
-		# Draw the drag card in a grid cell if the mouse is hovering over it
-		if self.drag_card:
-			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
-
-			result = self.field.board.grid.get_cell_at_mouse()
-			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				pos = result['pos']
-				if self.field.board.cards[pos] == None:
-					cell_top_left = self.field.board.grid.get_cell_pos(result['pos'], align=('center','top'))
-					cell_top_left[0] -= board_card_size[0]//2
-					self.drag_card.draw(cell_top_left, "board_hover")
-					drawn_in_board = True
-			
-			if drawn_in_board == False:
-				mouse_coords = Vec(pg.mouse.get_pos())
-				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
 
 Phases = {	"Begin":	0,
 			"Attack":	1,
@@ -1206,24 +1161,81 @@ class ConnectMenu(GameState):
 class Field(GameState):
 	def __init__(self):
 		self.board = Board(self, grid_count)
-		self.hand = Hand(self)
-		self.hand.add_card("Potion")
-		self.hand.add_card("Mountain", 3)
-		self.hand.add_card("Goblin", 2)
-		self.hand.add_card("Morale")
+		self.hands = {
+			0: Hand(), # Hand for player 0
+			1: Hand() # ..	 ..  ..     1
+		}
+		for _, hand in self.hands.items():
+			hand.add_card("Potion")
+			hand.add_card("Mountain", 3)
+			hand.add_card("Goblin", 2)
+			hand.add_card("Morale")
+
+		self.active_player = 0
+
+		self.hand_origin = Vec(10,620)
+		self.hand_spacing = Vec(110,0)
+		self.drag_card = None
+		self.card_grab_point = None
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
-			Input(mouse_button=1): lambda mouse_pos: self.hand.mouse_press(mouse_pos),
-			Input(mouse_button=1, type='release'): lambda mouse_pos: self.hand.mouse_release(mouse_pos),
-			Input(mouse_button=3): lambda mouse_pos: self.board.right_mouse_press(mouse_pos),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
+			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_release(mouse_pos),
+			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_press(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: game.advance_turn(),
-			Input(key=pg.K_1): lambda mouse_pos: self.hand.add_card("Mountain"),
-			Input(key=pg.K_2): lambda mouse_pos: self.hand.add_card("Goblin"),
-			Input(key=pg.K_3): lambda mouse_pos: self.hand.add_card("Morale"),
-			Input(key=pg.K_DELETE): lambda mouse_pos: self.hand.clear_hand(),
+			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.active_player].add_card("Mountain"),
+			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.active_player].add_card("Goblin"),
+			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.active_player].add_card("Morale"),
+			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.active_player].clear_hand(),
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu(),
+			Input(key=pg.K_TAB): lambda _: self.swap_hands()
 		}
+
+	@property
+	def active_hand(self):
+		return self.hands[self.active_player]
+
+	@property
+	def hand_rect(self):
+		return pg.Rect(self.hand_origin, (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
+	
+
+	def left_mouse_press(self, mouse_pos):
+		if not self.hand_rect.collidepoint(mouse_pos):
+			return
+		pos_relative_to_hand = Vec(mouse_pos) - self.hand_origin
+		clicked_card_index = int(pos_relative_to_hand[0] // (hand_card_size + self.hand_origin)[0])
+
+		if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
+			self.drag_card = self.active_hand.pop_card(clicked_card_index)
+			self.card_grab_point = pos_relative_to_hand - (clicked_card_index*(hand_card_size + self.hand_origin)[0],0)
+
+	def left_mouse_release(self, mouse_pos):
+		if self.drag_card:
+			placed_in_board = False # True if card is placed onto the board during this mouse release
+
+			result = self.board.grid.get_cell_at_mouse()
+			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
+				pos = result['pos']
+				if self.board.cards[pos] == None:
+					placed_in_board = self.board.place_card(result['pos'], self.drag_card)
+			
+			if placed_in_board == False:
+				self.active_hand.add_card(name=self.drag_card.name)
+			
+			self.drag_card = None
+			self.card_grab_point = None # Probably not necessary 
+			
+	def right_mouse_press(self, mouse_pos):
+		self.board.right_mouse_press(mouse_pos)
+			
+
+	def swap_hands(self):
+		if self.active_player == 1:
+			self.active_player = 0
+		else:
+			self.active_player = 1
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		pass
@@ -1231,12 +1243,70 @@ class Field(GameState):
 	def go_to_main_menu(self):
 		return MainMenu()
 
+	def _generate_hovered_card_index(self, mouse_pos):
+		if self.hand_rect.collidepoint(mouse_pos):
+			relative_x = mouse_pos[0] - self.hand_rect.left # mouse_x relative to left side of hand
+			for card_index in range(self.active_hand.card_count):
+				card_left = card_index*self.hand_spacing[0] # left side of card (relative to left side of hand)
+				card_relative_x = relative_x - card_left # mouse_x relative to left side of nearest card
+
+				if card_relative_x > 0 and card_relative_x < hand_card_size[0]:
+					self.hovered_card_index = card_index
+					return
+
+		self.hovered_card_index = None
+	
+
 	def update(self, dt, mouse_pos):
-		pass
+		self._generate_hovered_card_index(mouse_pos)
 
 	def draw(self):
 		self.board.draw()
-		self.hand.draw()
+
+		for i, card in enumerate(self.active_hand):
+			if i == self.hovered_card_index:
+				hover = True
+			else:
+				hover = False
+
+			card.draw(pos=self.hand_origin + i*self.hand_spacing, location='hand', hover=hover)
+
+		if self.active_player == 0:
+			active_player_color = red
+		else:
+			active_player_color = blue
+		
+		active_player_text = "Player %d"%self.active_player
+		text_h_padding = 10
+		text_size = ui_font.size(active_player_text)
+		padded_size = (text_size[0]+2*text_h_padding, text_size[1])
+		active_player_text_surface = pg.Surface(padded_size)
+		pg.draw.rect(active_player_text_surface, white, ((0,0),(padded_size)))
+		active_player_text_surface.blit(ui_font.render("Player %d"%self.active_player, True, active_player_color), (text_h_padding,0))
+		draw_surface_aligned(	target=screen,
+								source=active_player_text_surface,
+								pos=self.hand_origin,
+								align=('left','down'),
+								offset=(0,-10))
+
+
+		if self.drag_card:
+			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
+
+			result = self.board.grid.get_cell_at_mouse()
+			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
+				pos = result['pos']
+				if self.board.cards[pos] == None:
+					cell_top_left = self.board.grid.get_cell_pos(result['pos'], align=('center','top'))
+					cell_top_left[0] -= board_card_size[0]//2
+					self.drag_card.draw(cell_top_left, "board_hover")
+					drawn_in_board = True
+			
+			if drawn_in_board == False:
+				mouse_coords = Vec(pg.mouse.get_pos())
+				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
+
+			
 
 class Game:
 	def __init__(self):
@@ -1357,7 +1427,7 @@ class Board:
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
 			self.cards[cell].owner = None
-			self.field.hand.add_card(name=self.cards[cell].name)
+			self.field.active_hand.add_card(name=self.cards[cell].name)
 			self.cards[cell] = None
 			self._refresh_passives()
 
