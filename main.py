@@ -17,6 +17,7 @@ white = (255,255,255)
 red = (255,0,0)
 dark_red = (70,0,0)
 green = (0,255,0)
+light_green = (0,150,0)
 blue = (0,0,255)
 dark_blue = (0,0,70)
 gold = (255,215,0)
@@ -540,8 +541,9 @@ class CardPool:
 				return card
 
 class Hand:
-	def __init__(self):
+	def __init__(self, field):
 		self.cards = []
+		self.field = field
 
 	def __iter__(self):
 		return iter(self.cards)
@@ -557,7 +559,7 @@ class Hand:
 		return len(self.cards)
 
 	def add_card(self, name, count=1):
-		card = game.card_pool.get_card_by_name(name)
+		card = self.field.game.card_pool.get_card_by_name(name)
 		if card:
 			for _ in range(count):
 				self.cards.append(card.clone())
@@ -572,11 +574,15 @@ class Hand:
 		self.cards = []
 
 Phases = {	"Begin":	0,
-			"Attack":	1,
-			"End":	 	2,
+			"Main 1":	1,
+			"Attack":	2,
+			"Main 2":	3,
+			"End":	 	4,
 			0: "Begin",
-			1: "Attack",
-			2: "End"}
+			1: "Main 1",
+			2: "Attack",
+			3: "Main 2",
+			4: "End"}
 
 line_spacing = 9
 
@@ -591,30 +597,38 @@ class TurnDisplay:
 		self.__generate_phase_text()
 
 	def __generate_phase_text(self):
-		begin_color, attack_color, end_color = white, white, white
+		begin_color, main1_color, attack_color, main2_color, end_color = white, white, white, white, white
 
 		if self.phase == "Begin":
 			begin_color = green
+		elif self.phase == "Main 1":
+			main1_color = green
 		elif self.phase == "Attack":
 			attack_color = green
+		elif self.phase == "Main 2":
+			main2_color = green
 		elif self.phase == "End":
 			end_color = green
 
 		begin_text = ui_font.render("Begin", True, begin_color)
+		main1_text = ui_font.render("Main 1", True, main1_color)
 		attack_text = ui_font.render("Attack", True, attack_color)
+		main2_text = ui_font.render("Main 2", True, main2_color)
 		end_text = ui_font.render("End", True, end_color)
 
 		if self.phase_text == None:
-			sum_heights = 24*3 + line_spacing*2
+			sum_heights = 24*5 + line_spacing*4
 			max_width = max(begin_text.get_width(), attack_text.get_width(), end_text.get_width())
-			self.phase_text = pg.Surface((max_width, sum_heights + line_spacing*2))
+			self.phase_text = pg.Surface((max_width, sum_heights + line_spacing*4))
 			self.phase_text.set_colorkey(black)
 		else:
 			self.phase_text.fill(black)
 
 		self.phase_text.blit(begin_text, (0,0))
-		self.phase_text.blit(attack_text, (0,24+line_spacing*1))
-		self.phase_text.blit(end_text, (0,48+line_spacing*2))
+		self.phase_text.blit(main1_text, (0,(24+line_spacing)*1))
+		self.phase_text.blit(attack_text, (0,(24+line_spacing)*2))
+		self.phase_text.blit(main2_text, (0,(24+line_spacing)*3))
+		self.phase_text.blit(end_text, (0,(24+line_spacing)*4))
 
 	def draw(self, pos, align):
 		draw_surface_aligned(target=screen, source=self.phase_text, pos=pos, align=align)
@@ -630,6 +644,99 @@ class InputMap:
 		self.actions[input]
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
+
+class Button:
+	def __init__(	self,
+					pos, font,
+					align=('left','top'),
+					text='',
+					padding=(10,0)):
+		self.pos = pos
+		self.font = font
+		self.text = text
+		self.padding = padding
+		self.align = align
+
+		self.width = self.font.size(text)[0] + self.padding[0]*2
+		self.height = self.font.size(text)[1] + self.padding[1]*2
+
+		self._hovered = False
+
+		self._generate_surfaces()
+
+	@property
+	def size(self):
+		return (self.width, self.height)
+
+	@property
+	def rect(self):
+		offset_x, offset_y = 0, 0
+		if self.align[0] == 'center':
+			offset_x -= self.width//2
+		elif self.align[0] == 'right':
+			offset_x -= self.width
+
+		if self.align[1] == 'center':
+			offset_y -= self.height//2
+		elif self.align[1] == 'down':
+			offset_y -= self.height
+
+		return pg.Rect((self.pos[0]+offset_x, self.pos[1]+offset_y), self.size)
+	
+	def _generate_surfaces(self):
+		self._generate_box_surface()	
+		self._generate_text_surface()
+
+	def _generate_box_surface(self):
+		self.box_surface = pg.Surface(self.size)
+
+		bg_color = dark_grey
+		if self.hovered:
+			bg_color = light_green
+
+		pg.draw.rect(self.box_surface, bg_color, ((0,0),self.size))
+		pg.draw.rect(self.box_surface, white, ((0,0),self.size),1)
+
+	def _generate_text_surface(self):
+		text_color = light_grey
+		if self.hovered:
+			text_color = white
+
+		self.text_surface = self.font.render(self.text, True, text_color)
+
+	@property
+	def hovered(self):
+		return self._hovered
+
+	@hovered.setter
+	def hovered(self, hovered):
+		value_changed = False
+		if self._hovered != hovered:
+			value_changed = True
+
+		self._hovered = hovered
+
+		if value_changed:
+			self._generate_surfaces()
+
+	
+
+	def update(self, dt, mouse_pos):
+		if self.rect.collidepoint(mouse_pos):
+			self.hovered = True
+		else:
+			self.hovered = False
+
+	def draw(self):
+		draw_offset = draw_surface_aligned(	target=screen,
+											source=self.box_surface,
+											pos=self.pos,
+											align=self.align)
+
+		draw_surface_aligned(	target=screen,
+								source=self.text_surface,
+								pos=(self.pos[0]+draw_offset[0]+self.padding[0], self.pos[1]+draw_offset[1]+self.padding[1]))
+
 
 class TextEntry:
 	def __init__(	self,
@@ -1039,6 +1146,8 @@ class ListMenu:
 
 
 class GameState:
+	def __init__(self, game):
+		self.game = game
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		state = None
 		if input in self.input_map:
@@ -1056,7 +1165,9 @@ class GameState:
 		raise NotImplementedError()
 
 class MainMenu(GameState):
-	def __init__(self):
+	def __init__(self, game):
+		super().__init__(game)
+
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_SPACE): lambda _: self.keyboard_select_menu_item(),
@@ -1093,9 +1204,9 @@ class MainMenu(GameState):
 	def activate_menu(self):
 		selected = self.list_menu.get_selected_item()
 		if selected == 'Play':
-			return Field()
+			return Field(self.game)
 		elif selected == 'Connect':
-			return ConnectMenu()
+			return ConnectMenu(self.game)
 		elif selected == 'Exit':
 			sys.exit()
 
@@ -1107,7 +1218,9 @@ class MainMenu(GameState):
 		return self.activate_menu()
 
 class ConnectMenu(GameState):
-	def __init__(self):
+	def __init__(self, game):
+		super().__init__(game)
+
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
@@ -1148,7 +1261,7 @@ class ConnectMenu(GameState):
 			element.left_mouse_released(mouse_pos)
 
 	def cancel(self):
-		return MainMenu()
+		return MainMenu(self.game)
 
 	def update(self, dt, mouse_pos):
 		for element in self.ui_elements:
@@ -1159,11 +1272,13 @@ class ConnectMenu(GameState):
 			element.draw()
 
 class Field(GameState):
-	def __init__(self):
+	def __init__(self, game):
+		super().__init__(game)
+
 		self.board = Board(self, grid_count)
 		self.hands = {
-			0: Hand(), # Hand for player 0
-			1: Hand() # ..	 ..  ..     1
+			0: Hand(self), # Hand for player 0
+			1: Hand(self) # ..	 ..  ..     1
 		}
 		for _, hand in self.hands.items():
 			hand.add_card("Potion")
@@ -1171,12 +1286,19 @@ class Field(GameState):
 			hand.add_card("Goblin", 2)
 			hand.add_card("Morale")
 
-		self.active_player = 0
+		self.player_turn = 0 # Player 'id' of the player whose turn it is.
+		self.shown_hand = 0 # Player 'id' of the player whose hand is currently being displayed
 
 		self.hand_origin = Vec(10,620)
 		self.hand_spacing = Vec(110,0)
 		self.drag_card = None
 		self.card_grab_point = None
+
+		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('right','down'),offset=(0,5)),
+									align=('right','up'),
+									font=ui_font,
+									text="End Turn")
+
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
@@ -1184,23 +1306,22 @@ class Field(GameState):
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_release(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_press(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: game.advance_turn(),
-			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.active_player].add_card("Mountain"),
-			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.active_player].add_card("Goblin"),
-			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.active_player].add_card("Morale"),
-			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.active_player].clear_hand(),
+			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.shown_hand].add_card("Mountain"),
+			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.shown_hand].add_card("Goblin"),
+			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.shown_hand].add_card("Morale"),
+			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.shown_hand].clear_hand(),
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu(),
 			Input(key=pg.K_TAB): lambda _: self.swap_hands()
 		}
 
 	@property
 	def active_hand(self):
-		return self.hands[self.active_player]
+		return self.hands[self.shown_hand]
 
 	@property
 	def hand_rect(self):
 		return pg.Rect(self.hand_origin, (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
 	
-
 	def left_mouse_press(self, mouse_pos):
 		if not self.hand_rect.collidepoint(mouse_pos):
 			return
@@ -1229,19 +1350,18 @@ class Field(GameState):
 			
 	def right_mouse_press(self, mouse_pos):
 		self.board.right_mouse_press(mouse_pos)
-			
 
 	def swap_hands(self):
-		if self.active_player == 1:
-			self.active_player = 0
+		if self.shown_hand == 1:
+			self.shown_hand = 0
 		else:
-			self.active_player = 1
+			self.shown_hand = 1
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		pass
 
 	def go_to_main_menu(self):
-		return MainMenu()
+		return MainMenu(self.game)
 
 	def _generate_hovered_card_index(self, mouse_pos):
 		if self.hand_rect.collidepoint(mouse_pos):
@@ -1255,10 +1375,10 @@ class Field(GameState):
 					return
 
 		self.hovered_card_index = None
-	
 
 	def update(self, dt, mouse_pos):
 		self._generate_hovered_card_index(mouse_pos)
+		self.turn_button.update(dt, mouse_pos)
 
 	def draw(self):
 		self.board.draw()
@@ -1271,24 +1391,25 @@ class Field(GameState):
 
 			card.draw(pos=self.hand_origin + i*self.hand_spacing, location='hand', hover=hover)
 
-		if self.active_player == 0:
+		if self.shown_hand == 0:
 			active_player_color = red
 		else:
 			active_player_color = blue
 		
-		active_player_text = "Player %d"%self.active_player
+		active_player_text = "Player %d"%self.shown_hand
 		text_h_padding = 10
 		text_size = ui_font.size(active_player_text)
 		padded_size = (text_size[0]+2*text_h_padding, text_size[1])
 		active_player_text_surface = pg.Surface(padded_size)
 		pg.draw.rect(active_player_text_surface, white, ((0,0),(padded_size)))
-		active_player_text_surface.blit(ui_font.render("Player %d"%self.active_player, True, active_player_color), (text_h_padding,0))
+		active_player_text_surface.blit(ui_font.render(active_player_text, True, active_player_color), (text_h_padding,0))
 		draw_surface_aligned(	target=screen,
 								source=active_player_text_surface,
 								pos=self.hand_origin,
 								align=('left','down'),
 								offset=(0,-10))
 
+		self.turn_button.draw()
 
 		if self.drag_card:
 			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
@@ -1333,7 +1454,10 @@ class Game:
 		self.__refresh_hp_surfaces()
 		self.hp_text_offset = (10,0)
 
-		self.state = MainMenu()
+		if len(sys.argv) == 1:
+			self.state = MainMenu(self)
+		else:
+			self.state = Field(self)
 
 	def __refresh_turn_surface(self):
 		self.turn_text = ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
@@ -1377,8 +1501,12 @@ class Game:
 			if self._phase_name == "Begin":
 				self.board.do_begin_phase()
 				self.__advance_phase()
+			elif self._phase_name == "Main 1":
+				self.__advance_phase()
 			elif self._phase_name == "Attack":
 				self.board.do_attack_phase()
+				self.__advance_phase()
+			elif self._phase_name == "Main 2":
 				self.__advance_phase()
 			elif self._phase_name == "End":
 				self._turn_number += 1
