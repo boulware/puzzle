@@ -16,11 +16,14 @@ dark_grey = (40,40,40)
 white = (255,255,255)
 red = (255,0,0)
 dark_red = (70,0,0)
+very_dark_red = (40,0,0)
 green = (0,255,0)
 light_green = (0,150,0)
 dark_green = (0,70,0)
+very_dark_green = (0,40,0)
 blue = (0,0,255)
 dark_blue = (0,0,70)
+very_dark_blue = (0,0,40)
 gold = (255,215,0)
 
 # Game parameters
@@ -89,6 +92,7 @@ class Grid:
 		self.rect = pg.Rect(origin, [(dimensions[x_n] * cell_size[x_n]) for x_n in range(2)])
 		self.cell_size = cell_size
 		self.update_drawable()
+		self._generate_surface()
 
 	def update_drawable(self):
 		self.drawable = True
@@ -104,8 +108,16 @@ class Grid:
 		self.dimensions = np.add(self.dimensions, amounts)
 
 		self.update_drawable()
+		self._generate_surface()
 
 		return True
+
+	# Returns whether the cell is on 'player 0's (return 0) side of the board or 'player 1's (return 1)
+	def get_cell_owner(self, cell):
+		if cell[1] >= 0 and cell[1] <= 2:
+			return 1
+		if cell [1] >= 3 and cell[1] <= 5:
+			return 0
 
 	def get_cells_by_distance(self, start_cell, distance): # Using Chebyshev distance (King's distance)
 		distance = max(0, distance) # Clamp distance to a non-negative value
@@ -165,16 +177,33 @@ class Grid:
 		if grid_x >=0 and grid_x < self.dimensions[0] and grid_y >= 0 and grid_y < self.dimensions[1]:
 			hit = True
 
-		return {'hit': hit, 'pos': (grid_x, grid_y)}
+		return {'hit': hit, 'cell': (grid_x, grid_y)}
+
+	def _generate_surface(self):
+		self.surface = pg.Surface((self.rect.size[0]+1, self.rect.size[1]+1))
+		pg.draw.rect(self.surface, very_dark_blue, ((0,0), (self.rect.width, self.rect.height//2)))
+		pg.draw.rect(self.surface, very_dark_red, ((0,self.rect.height//2),(self.rect.width,self.rect.height//2)))
+
+		grid_color = white
+
+		for x in range(self.dimensions[0]+1):
+			x_start = x*self.cell_size[0]
+			pg.draw.line(self.surface, grid_color, (x_start, 0), (x_start, self.cell_size[1]*self.dimensions[1]))
+		for y in range(self.dimensions[1]+1):
+			y_start = y*self.cell_size[1]
+			pg.draw.line(self.surface, grid_color, (0, y_start), (self.cell_size[0]*self.dimensions[0], y_start))		
 
 	def draw(self, color=white):
 		if self.drawable:
-			for x in range(self.dimensions[0] + 1):
-				x_start = self.rect.x + x*self.cell_size[0]
-				pg.draw.line(screen, color, (x_start, self.rect.y), (x_start, self.rect.y + self.cell_size[1]*self.dimensions[1]))
-			for y in range(self.dimensions[1] + 1):
-				y_start = self.rect.y + y*self.cell_size[1]
-				pg.draw.line(screen, color, (self.rect.x, y_start), (self.rect.x + self.cell_size[0]*self.dimensions[0], y_start))
+			screen.blit(self.surface, self.rect.topleft)
+			# pg.draw.rect(screen, )
+
+			# for x in range(self.dimensions[0] + 1):
+			# 	x_start = self.rect.x + x*self.cell_size[0]
+			# 	pg.draw.line(screen, color, (x_start, self.rect.y), (x_start, self.rect.y + self.cell_size[1]*self.dimensions[1]))
+			# for y in range(self.dimensions[1] + 1):
+			# 	y_start = self.rect.y + y*self.cell_size[1]
+			# 	pg.draw.line(screen, color, (self.rect.x, y_start), (self.rect.x + self.cell_size[0]*self.dimensions[0], y_start))
 
 	def color_cell(self, position, color):
 		cell_rect = self.get_cell_rect(position)
@@ -278,10 +307,10 @@ class Card:
 
 	def _generate_hand_surface(self):
 		bg_color = dark_grey
-		if self.owner == 0:
-			bg_color = dark_red
-		elif self.owner == 1:
-			bg_color = dark_blue
+		# if self.owner == 0:
+		# 	bg_color = dark_red
+		# elif self.owner == 1:
+		# 	bg_color = dark_blue
 
 		self._hand_surface = pg.Surface(hand_card_size)
 
@@ -289,7 +318,7 @@ class Card:
 		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
 		title_surface = card_text_sm.render(self.name, True, white)
 		self.hand_surface.blit(title_surface, (5,0))
-		cost_surface = card_text_lg.render(str(self.cost), True, grey)
+		cost_surface = card_text_lg.render(str(self.cost), True, light_grey)
 		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
 
 	def _generate_board_surface(self):
@@ -1376,9 +1405,9 @@ class Field(GameState):
 
 			result = self.board.grid.get_cell_at_mouse()
 			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				pos = result['pos']
-				if self.board.cards[pos] == None:
-					placed_in_board = self.board.place_card(result['pos'], self.drag_card)
+				pos = result['cell']
+				if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
+					placed_in_board = self.board.place_card(result['cell'], self.drag_card)
 			
 			if placed_in_board == False:
 				self.active_hand.add_card(name=self.drag_card.name)
@@ -1489,9 +1518,9 @@ class Field(GameState):
 
 			result = self.board.grid.get_cell_at_mouse()
 			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				pos = result['pos']
+				pos = result['cell']
 				if self.board.cards[pos] == None:
-					cell_top_left = self.board.grid.get_cell_pos(result['pos'], align=('center','top'))
+					cell_top_left = self.board.grid.get_cell_pos(result['cell'], align=('center','top'))
 					cell_top_left[0] -= board_card_size[0]//2
 					self.drag_card.draw(cell_top_left, "board_hover")
 					drawn_in_board = True
@@ -1579,7 +1608,7 @@ class Board:
 	def place_card(self, cell, card):
 		if self.grid.check_cell_valid(cell) == True:
 			card.pos = cell
-			card.owner = self.get_cell_owner(cell)
+			card.owner = self.grid.get_cell_owner(cell)
 			self.cards[cell] = card
 			self._refresh_passives()
 
@@ -1591,7 +1620,7 @@ class Board:
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
 			self.cards[cell].owner = None
-			self.field.player_turn.add_card(name=self.cards[cell].name)
+			self.field.active_hand.add_card(name=self.cards[cell].name)
 			self.cards[cell] = None
 			self._refresh_passives()
 
@@ -1608,19 +1637,9 @@ class Board:
 	def right_mouse_press(self, pos):
 		result = self.grid.get_cell_at_mouse()
 		if result['hit'] == True:
-			cell = result['pos']
+			cell = result['cell']
 			self.return_card_to_hand(cell)
 			self._refresh_passives()
-
-	def get_cell_owner(self, cell):
-		if self.grid.check_cell_valid(cell) == True:
-			if cell[1] < grid_count[1]//2:
-				return 1
-			else:
-				return 0
-		else:
-			print("Tried to get cell owner of invalid cell")
-			return None
 
 	def get_frontmost_occupied_cell(self, player, lane):
 		ranks = []
@@ -1640,16 +1659,6 @@ class Board:
 		return {'error': False,
 				'cell': None} # There are no cards in the lane
 
-
-
-	# def check_if_card_is_front(self, cell):
-	# 	if self.grid.check_cell_valid(cell) == False:
-	# 		print("check_if_card_is_front() got invalid cell")
-	# 		return {'error': True}
-
-	# 	if self.get_frontmost_occupied_cell(
-	# 		return {'error': False,
-	# 				'result': True}
 
 	def _reset_mana(self):
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
@@ -1694,7 +1703,6 @@ class Board:
 					self.cards[cell_coord].apply_buff(power=1,max_health=1)
 
 	def do_passive(self):
-		#traceback.print_stack()
 		for _, card in np.ndenumerate(self.cards):
 			if card != None:
 				card.do_passive(self.field)
@@ -1752,6 +1760,8 @@ class Board:
 				pass
 
 	def draw(self):
+		self.grid.draw(grey)
+
 		# Draw the cards in the board
 		for x in range(self.size[0]):
 			for y in range(self.size[1]):
@@ -1765,9 +1775,6 @@ class Board:
 		for i, mana in np.ndenumerate(self.red_mana):
 			mana_surface = count_font.render(str(mana), True, red)
 			self.grid.draw_surface_in_cell(mana_surface, i, align=('right', 'down'), offset=(-2,-2))
-
-
-		self.grid.draw(grey)
 
 # Represents the maps between an input and an action
 #Control = namedtuple('Control', 'input action')
