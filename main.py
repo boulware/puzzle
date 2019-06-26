@@ -1,4 +1,4 @@
-import sys, os, copy, traceback, inspect, socket
+import sys, os, copy, traceback, inspect, socket, selectors, types
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 from collections import namedtuple
 from typing import NamedTuple, Any
@@ -701,7 +701,35 @@ class InputMap:
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
-class Button:
+class UI_Element:
+	def key_pressed(self, key, mod, unicode_key):
+		pass
+	def left_mouse_pressed(self, mouse_pos):
+		pass
+	def left_mouse_released(self, mouse_pos):
+		pass
+	def update(self, dt, mouse_pos):
+		pass
+	def draw(self):
+		pass
+
+class Label(UI_Element):
+	def __init__(self, pos, font, text, text_color=white):
+		self.pos = pos
+		self.font = font
+		self.text = text
+		self.text_color = text_color
+
+		self._generate_surface()
+
+	def _generate_surface(self):
+		self.surface = self.font.render(self.text, True, self.text_color)
+
+	def draw(self):
+		screen.blit(self.surface, self.pos)
+
+
+class Button(UI_Element):
 	def __init__(	self,
 					pos, font,
 					text,
@@ -803,7 +831,7 @@ class Button:
 											pos=self.pos,
 											align=self.align)
 
-class TextEntry:
+class TextEntry(UI_Element):
 	def __init__(	self,
 					pos, font,
 					align=('left','top'), text_align=None,
@@ -933,7 +961,7 @@ class TextEntry:
 		self.text = left + right
 		self._unselect(cursor_pos = self.selected_text_indices[0])
 
-	def keypress(self, key, mod, unicode_key):
+	def key_pressed(self, key, mod, unicode_key):
 		if self.selected == False:
 			return
 
@@ -1105,7 +1133,7 @@ class TextEntry:
 		if self.selected:
 			self._draw_cursor()
 
-class ListMenu:
+class ListMenu(UI_Element):
 	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0):
 		self.items = items
 		self.pos = pos
@@ -1213,6 +1241,7 @@ class ListMenu:
 class GameState:
 	def __init__(self, game):
 		self.game = game
+		self.ui_elements = []
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		state = None
 		if input in self.input_map:
@@ -1227,7 +1256,8 @@ class GameState:
 		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
 	def draw(self):
-		raise NotImplementedError()
+		for element in self.ui_elements:
+			element.draw()
 
 class MainMenu(GameState):
 	def __init__(self, game):
@@ -1250,7 +1280,7 @@ class MainMenu(GameState):
 		}
 
 
-		self.list_menu = ListMenu(	items=('Play', 'Connect', 'Exit'),
+		self.list_menu = ListMenu(	items=('Play', 'Host', 'Connect', 'Exit'),
 									pos=(screen_size[0]//2, screen_size[1]//2),
 									align=('center','center'),
 									text_align=('center'),
@@ -1270,6 +1300,8 @@ class MainMenu(GameState):
 		selected = self.list_menu.get_selected_item()
 		if selected == 'Play':
 			return Field(self.game)
+		elif selected == 'Host':
+			return HostMenu(self.game)
 		elif selected == 'Connect':
 			return ConnectMenu(self.game)
 		elif selected == 'Exit':
@@ -1282,45 +1314,49 @@ class MainMenu(GameState):
 	def keyboard_select_menu_item(self):
 		return self.activate_menu()
 
-class ConnectMenu(GameState):
+class HostMenu(GameState):
 	def __init__(self, game):
 		super().__init__(game)
 
 		self.input_map = {
-			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
+			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(key=pg.K_RETURN): lambda _: self._submit()
-		}
+		}		
 
-		self.ui_elements = []
-
-		self.ip_textentry = TextEntry(	pos=(screen_size[0]//2-100,screen_size[1]//2),
-										type='ip',
-										font=main_menu_font_med,
-										label='IP Address')
+		self.accepting_connections = False
+		self.sel = None
+		self.sock = None
 
 		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
 										type='port',
 										font=main_menu_font_med,
-										label='Port')
+										label='Port',
+										default_text='4141')
 
-		self.connect_button = Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
-										font=main_menu_font_med,
-										text='Connect')
+		self.host_button = Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
+									font=main_menu_font_med,
+									text='Host')
 
-		self.ui_elements.append(self.ip_textentry)
+		self.cancel_button = Button(pos=(screen_size[0]//2-100,screen_size[1]//2+250),
+									font=main_menu_font_med,
+									text='Cancel')
+
+		self.accepting_connections_label = Label(	pos=(0,0),
+													font=main_menu_font_med,
+													text='Accepting Connections',
+													text_color=green)
+
 		self.ui_elements.append(self.port_textentry)
-		#self.ui_elements.append(self.connect_button)
+		self.ui_elements.append(self.host_button)
+		self.ui_elements.append(self.cancel_button)
+		self.ui_elements.append(self.accepting_connections_label)
 
-
-	def _submit(self):
-		print("(fake) Attempting to connect to %s:%s" % (self.ip_textentry.text, self.port_textentry.text))
-
-	def any_key_pressed(self, key, mod, unicode_key):
+	def key_pressed(self, key, mod, unicode_key):
 		for element in self.ui_elements:
-			element.keypress(key, mod, unicode_key)
+			element.key_pressed(key, mod, unicode_key)
 
 	def left_mouse_pressed(self, mouse_pos):
 		for element in self.ui_elements:
@@ -1328,7 +1364,164 @@ class ConnectMenu(GameState):
 
 	def left_mouse_released(self, mouse_pos):
 		for element in self.ui_elements:
-			element.left_mouse_released(mouse_pos)
+			result = element.left_mouse_released(mouse_pos)
+			if element == self.host_button:
+				if result:
+					self._start_host()
+			elif element == self.cancel_button:
+				if result:
+					self._close_connection()
+
+	def _start_host(self):
+		#self.game.start_host('localhost', int(self.port_textentry.text))
+		self.sel = selectors.DefaultSelector()
+
+		host = 'localhost'
+		port = int(self.port_textentry.text)
+
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.sock.bind((host,port))
+		self.sock.listen()
+		self.sock.setblocking(False)
+		print("Now accepting connections on %s:%s" % (host, port))
+		self.sel.register(self.sock, selectors.EVENT_READ, data=None)
+		self.accepting_connections = True
+
+	def _attempt_to_accept_connection(self, sock):
+		connection, address = sock.accept()
+		print('Accepted connection from' , address)
+		connection.setblocking(False)
+		data = types.SimpleNamespace(addr=address, inb=b"", outb=b"")
+		events = selectors.EVENT_READ | selectors.EVENT_WRITE
+		self.sel.register(connection, events, data=data)
+
+	def _service_connection(self, key, mask):
+		sock = key.fileobj
+		data = key.data
+		if mask & selectors.EVENT_READ:
+			recv_data = sock.recv(1024)
+			if recv_data:
+				data.outb += recv_data
+		elif mask & selectors.EVENT_WRITE:
+			if data.outb:
+				print('echoing', repr(data.outb), 'to', data.addr)
+				sent = sock.send(data.outb)
+				data.outb = data.outb[sent:]
+
+	def _close_connection(self):
+		print('Closing connection')
+		self.accepting_connections = False
+		self.sel.unregister(self.sock)
+		self.sock.close()
+
+	def update(self, dt, mouse_pos):
+		if self.accepting_connections:
+			events = self.sel.select(timeout=0)
+			for key, mask in events:
+				if key.data is None:
+					self._attempt_to_accept_connection(key.fileobj)
+				else:
+					self._service_connection(key, mask)
+
+	def draw(self):
+		for element in self.ui_elements:
+			if element == self.accepting_connections_label:
+				if self.accepting_connections:
+					element.draw()
+			else:
+				element.draw()
+
+	def cancel(self):
+		if self.sel:
+			self._close_connection()
+		return MainMenu(self.game)
+
+class ConnectMenu(GameState):
+	def __init__(self, game):
+		super().__init__(game)
+
+		self.input_map = {
+			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
+			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
+			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
+			Input(key=pg.K_RETURN): lambda _: self._submit()
+		}
+
+		self.ip_textentry = TextEntry(	pos=(screen_size[0]//2-100,screen_size[1]//2),
+										type='ip',
+										font=main_menu_font_med,
+										label='IP Address',
+										default_text='localhost')
+
+		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
+										type='port',
+										font=main_menu_font_med,
+										label='Port',
+										default_text='4141')
+
+		self.connect_button = Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
+										font=main_menu_font_med,
+										text='Connect')
+
+		self.ui_elements.append(self.ip_textentry)
+		self.ui_elements.append(self.port_textentry)
+		self.ui_elements.append(self.connect_button)
+
+		self.sel = None
+
+
+	def _attempt_to_connect(self, host, port):
+		self.sel = selectors.DefaultSelector()
+
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.sock.setblocking(False)
+		self.sock.connect_ex((host,port))
+		events = selectors.EVENT_READ | selectors.EVENT_WRITE
+		data = types.SimpleNamespace(	connid=0,
+										msg_total=1,
+										recv_total=0,
+										messages=[b"DEADBEEF"],
+										outb=b"")
+
+		#self.sel.register(self.sock, events, data=data)
+		self.sel.register(self.sock, events, data=data)
+
+	def _service_connection(self, key, mask):
+		sock = key.fileobj
+		data = key.data
+		if mask & selectors.EVENT_READ:
+			recv_data = sock.recv(1024)  # Should be ready to read
+			if recv_data:
+				print("received", repr(recv_data), "from connection", data.connid)
+				data.recv_total += len(recv_data)
+			if not recv_data or data.recv_total == data.msg_total:
+				print("closing connection", data.connid)
+				self.sel.unregister(sock)
+				self.sel = None
+				sock.close()
+		elif mask & selectors.EVENT_WRITE:
+			if not data.outb and data.messages:
+				data.outb = data.messages.pop(0)
+			if data.outb:
+				print("sending", repr(data.outb), "to connection", data.connid)
+				sent = sock.send(data.outb)  # Should be ready to write
+				data.outb = data.outb[sent:]
+
+	def key_pressed(self, key, mod, unicode_key):
+		for element in self.ui_elements:
+			element.key_pressed(key, mod, unicode_key)
+
+	def left_mouse_pressed(self, mouse_pos):
+		for element in self.ui_elements:
+			element.left_mouse_pressed(mouse_pos)
+
+	def left_mouse_released(self, mouse_pos):
+		for element in self.ui_elements:
+			result = element.left_mouse_released(mouse_pos)
+			if element == self.connect_button:
+				if result == True: # If button was pressed
+					self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
 
 	def cancel(self):
 		return MainMenu(self.game)
@@ -1337,9 +1530,10 @@ class ConnectMenu(GameState):
 		for element in self.ui_elements:
 			element.update(dt, mouse_pos)
 
-	def draw(self):
-		for element in self.ui_elements:
-			element.draw()
+		if self.sel:
+			events = self.sel.select(timeout=0)
+			for key, mask in events:
+				self._service_connection(key, mask)
 
 class Field(GameState):
 	def __init__(self, game):
@@ -1425,8 +1619,7 @@ class Field(GameState):
 
 		if self.turn_button.left_mouse_released(mouse_pos): # if button was pressed
 			self._end_turn()
-
-			
+	
 	def right_mouse_press(self, mouse_pos):
 		self.board.right_mouse_press(mouse_pos)
 
@@ -1561,8 +1754,15 @@ class Game:
 
 		if len(sys.argv) == 1:
 			self.state = MainMenu(self)
-		else:
-			self.state = Field(self)
+		elif len(sys.argv) == 2:
+			if sys.argv[1] == 'field':
+				self.state = Field(self)
+			elif sys.argv[1] == 'connect':
+				self.state = ConnectMenu(self)
+			elif sys.argv[1] == 'host':
+				self.state = HostMenu(self)
+			else:
+				self.state = MainMenu(self)
 
 	def __refresh_turn_surface(self):
 		self.turn_text = ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
