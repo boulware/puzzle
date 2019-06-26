@@ -28,7 +28,7 @@ gold = (255,215,0)
 
 # Game parameters
 grid_count = (5,6)
-node_size = (90,90)
+node_size = (80,80)
 grid_origin = (100,10)
 
 class Node: 
@@ -263,9 +263,8 @@ def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0
 	return align_offset
 
 hand_card_size = (100,160)
-board_card_size = (56,90)
-
-CreatureStats = namedtuple('CreatureStats', 'power max_health')
+card_proportion = hand_card_size[0]/hand_card_size[1]
+board_card_size = (int(node_size[0]*card_proportion),node_size[1])
 
 print_callstack = traceback.print_stack
 
@@ -303,8 +302,6 @@ class Card:
 
 		return self._board_surface
 	
-	
-
 	def _generate_hand_surface(self):
 		bg_color = dark_grey
 		# if self.owner == 0:
@@ -714,13 +711,23 @@ class UI_Element:
 		pass
 
 class Label(UI_Element):
-	def __init__(self, pos, font, text, text_color=white):
+	def __init__(self, pos, font, text_color=white, text=''):
 		self.pos = pos
 		self.font = font
-		self.text = text
 		self.text_color = text_color
+		self.text = text
 
 		self._generate_surface()
+
+	@property
+	def text(self):
+		return self._text
+
+	@text.setter
+	def text(self, new_text):
+		self._text = new_text
+		self._generate_surface()
+	
 
 	def _generate_surface(self):
 		self.surface = self.font.render(self.text, True, self.text_color)
@@ -1320,15 +1327,11 @@ class HostMenu(GameState):
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
-			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
+			Input(key=pg.K_ESCAPE): lambda _: self.return_to_menu(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(key=pg.K_RETURN): lambda _: self._submit()
 		}		
-
-		self.accepting_connections = False
-		self.sel = None
-		self.sock = None
 
 		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
 										type='port',
@@ -1340,19 +1343,13 @@ class HostMenu(GameState):
 									font=main_menu_font_med,
 									text='Host')
 
-		self.cancel_button = Button(pos=(screen_size[0]//2-100,screen_size[1]//2+250),
+		self.disconnect_button = Button(pos=(screen_size[0]//2-100,screen_size[1]//2+250),
 									font=main_menu_font_med,
-									text='Cancel')
-
-		self.accepting_connections_label = Label(	pos=(0,0),
-													font=main_menu_font_med,
-													text='Accepting Connections',
-													text_color=green)
+									text='Disconnect')
 
 		self.ui_elements.append(self.port_textentry)
 		self.ui_elements.append(self.host_button)
-		self.ui_elements.append(self.cancel_button)
-		self.ui_elements.append(self.accepting_connections_label)
+		self.ui_elements.append(self.disconnect_button)
 
 	def key_pressed(self, key, mod, unicode_key):
 		for element in self.ui_elements:
@@ -1368,72 +1365,30 @@ class HostMenu(GameState):
 			if element == self.host_button:
 				if result:
 					self._start_host()
-			elif element == self.cancel_button:
+			elif element == self.disconnect_button:
 				if result:
 					self._close_connection()
 
 	def _start_host(self):
-		#self.game.start_host('localhost', int(self.port_textentry.text))
-		self.sel = selectors.DefaultSelector()
+		try:
+			port = int(self.port_textentry.text)
+		except ValueError:
+			print("Invalid port")
 
-		host = 'localhost'
-		port = int(self.port_textentry.text)
-
-		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.sock.bind((host,port))
-		self.sock.listen()
-		self.sock.setblocking(False)
-		print("Now accepting connections on %s:%s" % (host, port))
-		self.sel.register(self.sock, selectors.EVENT_READ, data=None)
-		self.accepting_connections = True
-
-	def _attempt_to_accept_connection(self, sock):
-		connection, address = sock.accept()
-		print('Accepted connection from' , address)
-		connection.setblocking(False)
-		data = types.SimpleNamespace(addr=address, inb=b"", outb=b"")
-		events = selectors.EVENT_READ | selectors.EVENT_WRITE
-		self.sel.register(connection, events, data=data)
-
-	def _service_connection(self, key, mask):
-		sock = key.fileobj
-		data = key.data
-		if mask & selectors.EVENT_READ:
-			recv_data = sock.recv(1024)
-			if recv_data:
-				data.outb += recv_data
-		elif mask & selectors.EVENT_WRITE:
-			if data.outb:
-				print('echoing', repr(data.outb), 'to', data.addr)
-				sent = sock.send(data.outb)
-				data.outb = data.outb[sent:]
+		self.game.start_host(port)
 
 	def _close_connection(self):
-		print('Closing connection')
-		self.accepting_connections = False
-		self.sel.unregister(self.sock)
-		self.sock.close()
+		self.game.close_connection()
 
 	def update(self, dt, mouse_pos):
-		if self.accepting_connections:
-			events = self.sel.select(timeout=0)
-			for key, mask in events:
-				if key.data is None:
-					self._attempt_to_accept_connection(key.fileobj)
-				else:
-					self._service_connection(key, mask)
+		pass
+
 
 	def draw(self):
 		for element in self.ui_elements:
-			if element == self.accepting_connections_label:
-				if self.accepting_connections:
-					element.draw()
-			else:
-				element.draw()
+			element.draw()
 
-	def cancel(self):
-		if self.sel:
-			self._close_connection()
+	def return_to_menu(self):
 		return MainMenu(self.game)
 
 class ConnectMenu(GameState):
@@ -1442,7 +1397,7 @@ class ConnectMenu(GameState):
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
-			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
+			Input(key=pg.K_ESCAPE): lambda _: self.return_to_menu(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(key=pg.K_RETURN): lambda _: self._submit()
@@ -1472,41 +1427,7 @@ class ConnectMenu(GameState):
 
 
 	def _attempt_to_connect(self, host, port):
-		self.sel = selectors.DefaultSelector()
-
-		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.sock.setblocking(False)
-		self.sock.connect_ex((host,port))
-		events = selectors.EVENT_READ | selectors.EVENT_WRITE
-		data = types.SimpleNamespace(	connid=0,
-										msg_total=1,
-										recv_total=0,
-										messages=[b"DEADBEEF"],
-										outb=b"")
-
-		#self.sel.register(self.sock, events, data=data)
-		self.sel.register(self.sock, events, data=data)
-
-	def _service_connection(self, key, mask):
-		sock = key.fileobj
-		data = key.data
-		if mask & selectors.EVENT_READ:
-			recv_data = sock.recv(1024)  # Should be ready to read
-			if recv_data:
-				print("received", repr(recv_data), "from connection", data.connid)
-				data.recv_total += len(recv_data)
-			if not recv_data or data.recv_total == data.msg_total:
-				print("closing connection", data.connid)
-				self.sel.unregister(sock)
-				self.sel = None
-				sock.close()
-		elif mask & selectors.EVENT_WRITE:
-			if not data.outb and data.messages:
-				data.outb = data.messages.pop(0)
-			if data.outb:
-				print("sending", repr(data.outb), "to connection", data.connid)
-				sent = sock.send(data.outb)  # Should be ready to write
-				data.outb = data.outb[sent:]
+		self.game._attempt_to_connect(host, port)
 
 	def key_pressed(self, key, mod, unicode_key):
 		for element in self.ui_elements:
@@ -1523,17 +1444,12 @@ class ConnectMenu(GameState):
 				if result == True: # If button was pressed
 					self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
 
-	def cancel(self):
+	def return_to_menu(self):
 		return MainMenu(self.game)
 
 	def update(self, dt, mouse_pos):
 		for element in self.ui_elements:
 			element.update(dt, mouse_pos)
-
-		if self.sel:
-			events = self.sel.select(timeout=0)
-			for key, mask in events:
-				self._service_connection(key, mask)
 
 class Field(GameState):
 	def __init__(self, game):
@@ -1556,7 +1472,7 @@ class Field(GameState):
 		self.phase = Phase(['Begin','Main 1','Attack','Main 2','End'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
 
-		self.hand_origin = Vec(10,620)
+		self.hand_origin = Vec(self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50)))
 		self.hand_spacing = Vec(110,0)
 		self.drag_card = None
 		self.card_grab_point = None
@@ -1735,7 +1651,7 @@ class Field(GameState):
 			
 
 class Game:
-	def __init__(self):
+	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
 		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: game.change_health(1, self.owner)])
@@ -1752,17 +1668,132 @@ class Game:
 		self.__refresh_hp_surfaces()
 		self.hp_text_offset = (10,0)
 
-		if len(sys.argv) == 1:
-			self.state = MainMenu(self)
-		elif len(sys.argv) == 2:
-			if sys.argv[1] == 'field':
-				self.state = Field(self)
-			elif sys.argv[1] == 'connect':
-				self.state = ConnectMenu(self)
-			elif sys.argv[1] == 'host':
-				self.state = HostMenu(self)
-			else:
-				self.state = MainMenu(self)
+		self.selector = None
+		self.socket = None
+		self.accepting_connections = False
+		self.connected = False
+		self.connected_to_address = None
+		self.connection_role = None
+
+		self.ui_elements = []
+
+		self.connection_label = Label(	pos=(0,0),
+										font=main_menu_font_med,
+										text='',
+										text_color=green)
+
+
+
+		self.ui_elements.append(self.connection_label)
+
+		self.state = start_state(self)
+
+	def start_host(self, port):
+		self.selector = selectors.DefaultSelector()
+		host = 'localhost'
+
+		self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.socket.bind((host,port))
+		self.socket.listen()
+		self.socket.setblocking(False)
+		print("Now accepting connections %s:%s"%(host, port))
+		self.connection_label.text = "Accepting Connections"
+		self.selector.register(self.socket, selectors.EVENT_READ, data=None)
+		self.accepting_connections = True
+
+	def _attempt_to_accept_connection(self, sock):
+		connection, self.connected_to_address = sock.accept()
+		print('Accepted connection from' , self.connected_to_address)
+		self.connection_label.text = "Connected to %s"%str(self.connected_to_address)
+		connection.setblocking(False)
+		data = types.SimpleNamespace(addr=self.connected_to_address, inb=b"", outb=b"")
+		events = selectors.EVENT_READ | selectors.EVENT_WRITE
+		self.selector.register(connection, events, data=data)
+		self.accepting_connections = False
+		self.connected = True
+		self.connection_role = 'host'
+
+	def _attempt_to_connect(self, host, port):
+		self.selector = selectors.DefaultSelector()
+
+		self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.socket.setblocking(False)
+		self.socket.connect_ex((host,port))
+		events = selectors.EVENT_READ | selectors.EVENT_WRITE
+		data = types.SimpleNamespace(	connid=0,
+										msg_total=1,
+										recv_total=0,
+										messages=[b'SIMON IS CUTE'],
+										outb=b"")
+
+		self.selector.register(self.socket, events, data=data)
+		self.connection_role = 'client'
+		print('Connected to %s:%s'%(host,port))
+		self.connected = True
+		self.connection_label.text = 'Connected to %s:%s'%(host, port)
+
+	def _service_connection_as_host(self, key, mask):
+		sock = key.fileobj
+		data = key.data
+		if mask & selectors.EVENT_READ:
+			recv_data = sock.recv(1024)
+			if recv_data:
+				data.outb += recv_data
+				print('received', repr(data.outb))
+		elif mask & selectors.EVENT_WRITE:
+			if data.outb:
+				print('echoing', repr(data.outb), 'to', data.addr)
+				sent = sock.send(data.outb)
+				data.outb = data.outb[sent:]
+
+	def _service_connection_as_client(self, key, mask):
+		sock = key.fileobj
+		data = key.data
+		if mask & selectors.EVENT_READ:
+			recv_data = sock.recv(1024)  # Should be ready to read
+			if recv_data:
+				print("received", repr(recv_data), "from connection", data.connid)
+				data.recv_total += len(recv_data)
+			if not recv_data or data.recv_total == data.msg_total:
+				print("closing connection", data.connid)
+				self.sel.unregister(sock)
+				self.sel = None
+				sock.close()
+		elif mask & selectors.EVENT_WRITE:
+			if not data.outb and data.messages:
+				data.outb = data.messages.pop(0)
+			if data.outb:
+				print("sending", repr(data.outb), "to connection", data.connid)
+				sent = sock.send(data.outb)  # Should be ready to write
+				data.outb = data.outb[sent:]
+
+	def close_connection(self):
+		if self.accepting_connections or self.connected:
+			print('Closing connection')
+			self.accepting_connections = False
+			self.selector.unregister(self.socket)
+			self.socket.close()
+
+			self.selector = None
+			self.socket = None
+			self.connected = False
+			self.accepting_connections = False
+			self.connection_role = None
+		else:
+			print('Connection already closed')
+
+
+	def select(self):
+		if self.selector:
+			events = self.selector.select(timeout=0)
+			for key, mask in events:
+				if key.data is None:
+					self._attempt_to_accept_connection(key.fileobj)
+				else:
+					if self.connection_role == 'host':
+						self._service_connection_as_host(key, mask)
+					elif self.connection_role == 'client':
+						self._service_connection_as_client(key, mask)
 
 	def __refresh_turn_surface(self):
 		self.turn_text = ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
@@ -1795,10 +1826,17 @@ class Game:
 			self.state = state
 
 	def update(self, dt, mouse_pos):
+		self.select()
 		self.state.update(dt, mouse_pos)
 
 	def draw(self):
 		self.state.draw()
+		for element in self.ui_elements:
+			if element == self.connection_label:
+				if self.accepting_connections or self.connected:
+					element.draw()
+			else:
+				element.draw()
 
 		if isinstance(self.state, Field):
 #			self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
@@ -1986,11 +2024,15 @@ class Board:
 			mana_surface = count_font.render(str(mana), True, red)
 			self.grid.draw_surface_in_cell(mana_surface, i, align=('right', 'down'), offset=(-2,-2))
 
-# Represents the maps between an input and an action
-#Control = namedtuple('Control', 'input action')
+try:
+	if sys.argv[2] == 'l':
+		os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
+	elif sys.argv[2] == 'r':
+		os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (700,50)
+except:
+	pass
 
-# Pygame setup
-os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
+# pg setup
 pg.init()
 pg.key.set_repeat(300, 30)
 screen_size = (700,800)
@@ -2009,7 +2051,19 @@ main_menu_selected_font = pg.font.Font("Montserrat-Regular.ttf", 60)
 game_clock = pg.time.Clock()
 
 input = Input()
-game = Game()
+
+start_state = lambda game_: MainMenu(game_)
+try:
+	if sys.argv[1] == 'field':
+		start_state = lambda game_: Field(game_)
+	elif sys.argv[1] == 'connect':
+		start_state = lambda game_: ConnectMenu(game_)
+	elif sys.argv[1] == 'host':
+		start_state = lambda game_: HostMenu(game_)
+except IndexError:
+	pass
+
+game = Game(start_state)
 
 while True:
 	for event in pg.event.get():
