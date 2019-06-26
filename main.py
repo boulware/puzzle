@@ -193,17 +193,13 @@ class Grid:
 			y_start = y*self.cell_size[1]
 			pg.draw.line(self.surface, grid_color, (0, y_start), (self.cell_size[0]*self.dimensions[0], y_start))		
 
-	def draw(self, color=white):
+	def draw(self, color=white, player_perspective=0):
 		if self.drawable:
-			screen.blit(self.surface, self.rect.topleft)
-			# pg.draw.rect(screen, )
-
-			# for x in range(self.dimensions[0] + 1):
-			# 	x_start = self.rect.x + x*self.cell_size[0]
-			# 	pg.draw.line(screen, color, (x_start, self.rect.y), (x_start, self.rect.y + self.cell_size[1]*self.dimensions[1]))
-			# for y in range(self.dimensions[1] + 1):
-			# 	y_start = self.rect.y + y*self.cell_size[1]
-			# 	pg.draw.line(screen, color, (self.rect.x, y_start), (self.rect.x + self.cell_size[0]*self.dimensions[0], y_start))
+			if player_perspective == 0:
+				to_flip = False
+			elif player_perspective == 1:
+				to_flip = True
+			screen.blit(pg.transform.flip(self.surface, False, to_flip), self.rect.topleft)
 
 	def color_cell(self, position, color):
 		cell_rect = self.get_cell_rect(position)
@@ -1543,9 +1539,12 @@ class Field(GameState):
 				result = self.board.grid.get_cell_at_mouse()
 				if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
 					if self.cards_played < 1:
-						pos = result['cell']
-						if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
-							placed_in_board = self.board.place_card(result['cell'], self.drag_card)
+						if self.player_number == 0:
+							pos = result['cell']
+						elif self.player_number == 1:
+							pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
+						if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_number:
+							placed_in_board = self.board.place_card(pos, self.drag_card)
 							send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1])
 							self.queued_network_data.append(send_string.encode('utf-8'))
 							self.cards_played += 1
@@ -1646,7 +1645,7 @@ class Field(GameState):
 		self.turn_button.update(dt, mouse_pos)
 
 	def draw(self):
-		self.board.draw()
+		self.board.draw(player_perspective=self.player_number)
 
 		for i, card in enumerate(self.active_hand):
 			if i == self.hovered_card_index:
@@ -2070,14 +2069,16 @@ class Board:
 			if not is_creature_0 and not is_creature_1:
 				pass
 
-	def draw(self):
-		self.grid.draw(grey)
+	def draw(self, player_perspective=0):
+		self.grid.draw(grey, player_perspective=player_perspective)
 
 		# Draw the cards in the board
 		for x in range(self.size[0]):
 			for y in range(self.size[1]):
 				card = self.cards[x][y]
 				if card != None:
+					if player_perspective == 1:
+						y = self.size[1] - 1 - y
 					card_pos = self.grid.get_cell_pos((x,y), align=('center','top'))
 					card_pos[0] -= board_card_size[0]//2
 					card.draw(card_pos, 'board')
