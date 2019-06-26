@@ -704,8 +704,8 @@ Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'
 class Button:
 	def __init__(	self,
 					pos, font,
+					text,
 					align=('left','top'),
-					text='',
 					bg_colors={'default': black, 'hovered': dark_grey, 'pressed': green},
 					text_colors={'default': white, 'hovered': white, 'pressed': white},
 					padding=(10,0)):
@@ -1291,7 +1291,7 @@ class ConnectMenu(GameState):
 			Input(key=pg.K_ESCAPE): lambda _: self.cancel(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
-			Input(key=pg.K_RETURN): lambda _: self.submit()
+			Input(key=pg.K_RETURN): lambda _: self._submit()
 		}
 
 		self.ui_elements = []
@@ -1302,15 +1302,20 @@ class ConnectMenu(GameState):
 										label='IP Address')
 
 		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
-									type='port',
-									font=main_menu_font_med,
-									label='Port')
+										type='port',
+										font=main_menu_font_med,
+										label='Port')
+
+		self.connect_button = Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
+										font=main_menu_font_med,
+										text='Connect')
 
 		self.ui_elements.append(self.ip_textentry)
 		self.ui_elements.append(self.port_textentry)
+		#self.ui_elements.append(self.connect_button)
 
 
-	def submit(self):
+	def _submit(self):
 		print("(fake) Attempting to connect to %s:%s" % (self.ip_textentry.text, self.port_textentry.text))
 
 	def any_key_pressed(self, key, mod, unicode_key):
@@ -1352,6 +1357,7 @@ class Field(GameState):
 			hand.add_card("Morale")
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
+		self.cards_played = 0 # Tracks number of cards played on current turn
 
 		self.phase = Phase(['Begin','Main 1','Attack','Main 2','End'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
@@ -1405,9 +1411,11 @@ class Field(GameState):
 
 			result = self.board.grid.get_cell_at_mouse()
 			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				pos = result['cell']
-				if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
-					placed_in_board = self.board.place_card(result['cell'], self.drag_card)
+				if self.cards_played < 1:
+					pos = result['cell']
+					if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
+						placed_in_board = self.board.place_card(result['cell'], self.drag_card)
+						self.cards_played += 1
 			
 			if placed_in_board == False:
 				self.active_hand.add_card(name=self.drag_card.name)
@@ -1429,6 +1437,8 @@ class Field(GameState):
 			self.player_turn = 1
 		elif self.player_turn == 1:
 			self.player_turn = 0
+
+		self.cards_played = 0
 
 	def _advance_turn(self):
 		if self.phase.name == "Begin":
