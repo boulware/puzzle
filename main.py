@@ -1266,6 +1266,11 @@ class GameState:
 		for element in self.ui_elements:
 			element.draw()
 
+	def fetch_network_data(self):
+		pass
+	def process_network_data(self, data):
+		pass
+
 class MainMenu(GameState):
 	def __init__(self, game):
 		super().__init__(game)
@@ -1496,6 +1501,8 @@ class Field(GameState):
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu()
 		}
 
+		self.queued_network_data = []
+
 	@property
 	def active_hand(self):
  		return self.hands[self.player_turn]
@@ -1525,6 +1532,8 @@ class Field(GameState):
 					pos = result['cell']
 					if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
 						placed_in_board = self.board.place_card(result['cell'], self.drag_card)
+						send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1])
+						self.queued_network_data.append(send_string.encode('utf-8'))
 						self.cards_played += 1
 			
 			if placed_in_board == False:
@@ -1568,8 +1577,27 @@ class Field(GameState):
 		if end_of_turn:
 			self._end_turn()
 
+	def fetch_network_data(self):
+		if len(self.queued_network_data) > 0:
+			return self.queued_network_data.pop(0)
+
+	def process_network_data(self, data):
+		data_string = data.decode('utf-8')
+		args = data_string.split(';')
+		try:
+			if args[0] == 'card placed':
+				self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
+		except:
+			pass
+		#data[0] == 'F': # Data for field
+
 	def any_key_pressed(self, key, mod, unicode_key):
-		pass
+		if key == pg.K_a:
+			self.queued_network_data.append(b'a')
+		elif key == pg.K_s:
+			self.queued_network_data.append(b's')
+		elif key == pg.K_d:
+			self.queued_network_data.append(b'd')
 
 	def go_to_main_menu(self):
 		return MainMenu(self.game)
@@ -1686,7 +1714,19 @@ class Game:
 
 		self.ui_elements.append(self.connection_label)
 
-		self.state = start_state(self)
+		self._state = start_state(self)
+
+	@property
+	def state(self):
+		return self._state
+
+	@state.setter
+	def state(self, new_state):
+		# print('state changed from %s to %s'%(repr(self._state),repr(new_state)))
+		# print_callstack()
+		self._state = new_state
+		# print('--------------')
+	
 
 	def start_host(self, port):
 		self.selector = selectors.DefaultSelector()
@@ -1740,6 +1780,7 @@ class Game:
 			if recv_data:
 				data.outb += recv_data
 				print('received', repr(data.outb))
+				self.state.process_network_data(data.outb)
 		elif mask & selectors.EVENT_WRITE:
 			if data.outb:
 				print('echoing', repr(data.outb), 'to', data.addr)
@@ -1754,14 +1795,8 @@ class Game:
 			if recv_data:
 				print("received", repr(recv_data), "from connection", data.connid)
 				data.recv_total += len(recv_data)
-			if not recv_data or data.recv_total == data.msg_total:
-				print("closing connection", data.connid)
-				self.sel.unregister(sock)
-				self.sel = None
-				sock.close()
 		elif mask & selectors.EVENT_WRITE:
-			if not data.outb and data.messages:
-				data.outb = data.messages.pop(0)
+			data.outb = self.state.fetch_network_data()
 			if data.outb:
 				print("sending", repr(data.outb), "to connection", data.connid)
 				sent = sock.send(data.outb)  # Should be ready to write
