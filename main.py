@@ -120,6 +120,7 @@ class Grid:
 			return 0
 
 	def get_cells_by_distance(self, start_cell, distance): # Using Chebyshev distance (King's distance)
+		print(start_cell, distance)
 		distance = max(0, distance) # Clamp distance to a non-negative value
 
 		start_x = start_cell[0]
@@ -268,7 +269,7 @@ class Card:
 	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
 		self.name = name
 		self.cost = cost
-		self.pos = None
+		self.cell = None
 		self._owner = None
 
 		self.begin_phase_fns = begin_phase_fns
@@ -534,7 +535,7 @@ class CreatureCard(Card):
 	def clear_buffs(self):
 		Card.clear_buffs(self)
 		self.health_bar.max_health = self.max_health
-		# if board.check_if_card_is_front(self.pos) == True:
+		# if board.check_if_card_is_front(self.cell) == True:
 		# 	game.change_health(-self.power, self.enemy)
 
 	def clone(self):
@@ -561,7 +562,7 @@ class CardPool:
 	def get_card_by_name(self, name):
 		for card in self.cards:
 			if card.name == name:
-				return card
+				return card.clone()
 
 class Hand:
 	def __init__(self, field):
@@ -595,12 +596,6 @@ class Hand:
 
 	def clear_hand(self):
 		self.cards = []
-
-phases_old	 = {	0: "Begin",
-					1: "Main 1",
-					2: "Attack",
-					3: "Main 2",
-					4: "End"}
 
 class Phase:
 	def __init__(self, phase_names=[], initial_phase_ID=0):
@@ -707,9 +702,10 @@ class UI_Element:
 		pass
 
 class Label(UI_Element):
-	def __init__(self, pos, font, text_color=white, text=''):
+	def __init__(self, pos, font, align=('left','top'), text_color=white, text=''):
 		self.pos = pos
 		self.font = font
+		self.align = align
 		self.text_color = text_color
 		self.text = text
 
@@ -729,7 +725,7 @@ class Label(UI_Element):
 		self.surface = self.font.render(self.text, True, self.text_color)
 
 	def draw(self):
-		screen.blit(self.surface, self.pos)
+		draw_surface_aligned(target=screen, source=self.surface, pos=self.pos, align=self.align)
 
 
 class Button(UI_Element):
@@ -1482,7 +1478,7 @@ class Field(GameState):
 
 
 
-		self.phase = Phase(['Begin','Main 1','Attack','Main 2','End'])
+		self.phase = Phase(['End'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
 
 		self.hand_origin = Vec(self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50)))
@@ -1531,15 +1527,13 @@ class Field(GameState):
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu()
 		}
 
-		self.queued_network_data = []
-
 	def change_health(self, amount, player):
 		if player == 0 or player == 1:
 			self.player_healths[player] += amount
 			self.player_health_labels[player].text = 'Player %d: %d'%(player, self.player_healths[player])
 			if self.is_current_player_active():
-				send_string = 'health changed;' + str(amount) + ';' + str(player)
-				self.queued_network_data.append(send_string.encode('utf-8'))
+				send_string = 'health changed;' + str(amount) + ';' + str(player) + ';[END]'
+				self.game.queue_network_data(send_string.encode('utf-8'))
 		else:
 			print("Tried to change health of invalid player.")
 
@@ -1582,8 +1576,8 @@ class Field(GameState):
 							pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
 						if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_number:
 							placed_in_board = self.board.place_card(pos, self.drag_card)
-							send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1])
-							self.queued_network_data.append(send_string.encode('utf-8'))
+							send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1]) + ';[END]'
+							self.game.queue_network_data(send_string.encode('utf-8'))
 							self.cards_played += 1
 			
 			if placed_in_board == False:
@@ -1611,8 +1605,8 @@ class Field(GameState):
 
 	def _end_turn(self):
 		if self.is_current_player_active():
-			send_string = 'turn ended;' + str(self.player_turn)
-			self.queued_network_data.append(send_string.encode('utf-8'))
+			send_string = 'turn ended;' + str(self.player_turn) + ';[END]'
+			self.game.queue_network_data(send_string.encode('utf-8'))
 
 		self.phase.end_turn()
 		self.swap_active_player()
@@ -1620,50 +1614,45 @@ class Field(GameState):
 
 	def _advance_turn(self):
 		if self.is_current_player_active():
-			if self.phase.name == "Begin":
+			if self.phase.name == "End":
 				self.board.do_begin_phase()
-			elif self.phase.name == "Main 1":
-				pass
-			elif self.phase.name == "Attack":
 				self.board.do_attack_phase()
-			elif self.phase.name == "Main 2":
-				pass
-			elif self.phase.name == "End":
-				pass
 
 			self._advance_phase()
 
-			send_string = 'phase advanced;' + str(self.phase.name)
-			self.queued_network_data.append(send_string.encode('utf-8'))
+			send_string = 'phase advanced;' + str(self.phase.name) + ';[END]'
+			self.game.queue_network_data(send_string.encode('utf-8'))
 
 	def _advance_phase(self):
 		end_of_turn = self.phase.advance_phase()
 		if end_of_turn:
 			self._end_turn()
 
-	def fetch_network_data(self):
-		if len(self.queued_network_data) > 0:
-			return self.queued_network_data.pop(0)
-
 	def process_network_data(self, data):
-		data_string = data.decode('utf-8')
-		args = data_string.split(';')
-		try:
-			if args[0] == 'card placed':
-				self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
-			if args[0] == 'turn ended':
-				self.set_active_player(int(args[1]))
-			if args[0] == 'phase advanced':
-				self.phase.name = args[1]
-			if args[0] == 'health changed':
-				self.change_health(int(args[1]), int(args[2]))
-		except:
-			pass
+		raw_data_string = data.decode('utf-8')
+		event_strings = raw_data_string.split('[END]')
+		for event_string in event_strings:
+			args = event_string.split(';')
+			try:
+				if args[0] == 'card placed':
+					self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
+				if args[0] == 'turn ended':
+					print('turn ended')
+					self.set_active_player(int(args[1]))
+				if args[0] == 'phase advanced':
+					print('phase advanced')
+					self.phase.name = args[1]
+				if args[0] == 'health changed':
+					self.change_health(int(args[1]), int(args[2]))
+			except:
+				pass
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		pass
 
 	def go_to_main_menu(self):
+		send_string = 'quit field' + ';[END]'
+		self.game.queue_network_data(send_string.encode('utf-8'))
 		return MainMenu(self.game)
 
 	def _generate_hovered_card_index(self, mouse_pos):
@@ -1729,7 +1718,10 @@ class Field(GameState):
 
 			result = self.board.grid.get_cell_at_mouse()
 			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				pos = result['cell']
+				if self.player_number == 0:
+					pos = result['cell']
+				elif self.player_number == 1:
+					pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
 				if self.board.cards[pos] == None:
 					cell_top_left = self.board.grid.get_cell_pos(result['cell'], align=('center','top'))
 					cell_top_left[0] -= board_card_size[0]//2
@@ -1746,10 +1738,10 @@ class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
-		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: field.change_health(1, self.owner)])
-		mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self, field: field.board.add_mana(1, 'red', self.pos, 1)])
+		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: field.change_health(amount=1, player=self.owner)])
+		mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self, field: field.board.add_mana(amount=1, type='red', cell=self.cell, distance=1)])
 		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
-		morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self, field: field.board.buff_creatures_in_range(power=1,max_health=1,pos=self.pos,distance=2)])
+		morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self, field: field.board.buff_creatures_in_range(power=1,max_health=1,cell=self.cell,distance=2)])
 
 		self.card_pool.add_card(potion_card_prototype)
 		self.card_pool.add_card(mountain_card_prototype)
@@ -1763,12 +1755,15 @@ class Game:
 		self.connected_to_address = None
 		self.connection_role = None
 
+		self.network_data_queue = []
+
 		self.ui_elements = []
 
-		self.connection_label = Label(	pos=(0,0),
+		self.connection_label = Label(	pos=(0,screen_size[1]),
 										font=main_menu_font_med,
 										text='',
-										text_color=green)
+										text_color=green,
+										align=('left','down'))
 
 
 
@@ -1782,15 +1777,12 @@ class Game:
 
 	@state.setter
 	def state(self, new_state):
-		# print('state changed from %s to %s'%(repr(self._state),repr(new_state)))
-		# print_callstack()
 		self._state = new_state
-		# print('--------------')
 	
 
 	def start_host(self, port):
 		self.selector = selectors.DefaultSelector()
-		host = 'localhost'
+		host = '0.0.0.0'
 
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.socket.bind((host,port))
@@ -1839,14 +1831,14 @@ class Game:
 			recv_data = sock.recv(1024)
 			if recv_data:
 				#data.outb += recv_data
-				print('received', repr(recv_data))
+				#print('received', repr(recv_data))
 				self.state.process_network_data(recv_data)
 		elif mask & selectors.EVENT_WRITE:
-			data.outb = self.state.fetch_network_data()
-			if data.outb:
-				print('sending', repr(data.outb), 'to', data.addr)
-				sent = sock.send(data.outb)
-				data.outb = data.outb[sent:]
+			for packet in self.network_data_queue:
+				#print('sending', repr(packet), 'to', data.addr)
+				sent = sock.send(packet)
+
+			self.network_data_queue = []
 
 	def _service_connection_as_client(self, key, mask):
 		sock = key.fileobj
@@ -1854,15 +1846,15 @@ class Game:
 		if mask & selectors.EVENT_READ:
 			recv_data = sock.recv(1024)  # Should be ready to read
 			if recv_data:
-				print("received", repr(recv_data), "from connection", data.connid)
+				#print("received", repr(recv_data), "from connection", data.connid)
 				self.state.process_network_data(recv_data)
 #				data.recv_total += len(recv_data)
 		elif mask & selectors.EVENT_WRITE:
-			data.outb = self.state.fetch_network_data()
-			if data.outb:
-				print("sending", repr(data.outb), "to connection", data.connid)
-				sent = sock.send(data.outb)  # Should be ready to write
-				data.outb = data.outb[sent:]
+			for packet in self.network_data_queue:
+				#print("sending", repr(packet), "to connection", data.connid)
+				sent = sock.send(packet)  # Should be ready to write
+
+			self.network_data_queue = []
 
 	def close_connection(self):
 		if self.accepting_connections or self.connected:
@@ -1892,12 +1884,8 @@ class Game:
 					elif self.connection_role == 'client':
 						self._service_connection_as_client(key, mask)
 
-	def __refresh_turn_surface(self):
-		self.turn_text = ui_font.render("Turn: " + str(self._turn_number) + '(' + self._phase_name + ')', True, white)
-
-	def __refresh_hp_surfaces(self):
-		self._bottom_hp_text = ui_font.render("HP: " + str(self.player_healths[0]), True, white)
-		self._top_hp_text = ui_font.render("HP: " + str(self.player_healths[1]), True, grey)
+	def queue_network_data(self, data):
+		self.network_data_queue.append(data)
 
 	def is_valid_player(self, player):
 		if player == 0 or player == 1:
@@ -1940,7 +1928,8 @@ class Board:
 
 	def place_card(self, cell, card):
 		if self.grid.check_cell_valid(cell) == True:
-			card.pos = cell
+			print('placed ', card.name, ' at ', cell)
+			card.cell = cell
 			card.owner = self.grid.get_cell_owner(cell)
 			self.cards[cell] = card
 			self._refresh_passives()
@@ -1997,6 +1986,7 @@ class Board:
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
 	def _refresh_passives(self):
+		print('passives refreshed')
 		dirty = False
 
 		for cell, card in np.ndenumerate(self.cards):
@@ -2021,16 +2011,17 @@ class Board:
 			if card != None:
 				card.clear_buffs()
 
-	def add_mana(self, amount, type, pos, distance=1):
-		if pos:
+	def add_mana(self, amount, type, cell, distance=1):
+		if cell:
 			if type == "red":
-				cell_coords = self.grid.get_cells_by_distance(pos, distance)
+				cell_coords = self.grid.get_cells_by_distance(start_cell=cell, distance=distance)
+				print('adding %d mana to '%amount, cell_coords)
 				for cell_coord in cell_coords:
 					self.red_mana[cell_coord] += amount
 
-	def buff_creatures_in_range(self, power, max_health, pos, distance=1):
-		if pos:
-			cell_coords = self.grid.get_cells_by_distance(pos, distance)
+	def buff_creatures_in_range(self, power, max_health, cell, distance=1):
+		if cell:
+			cell_coords = self.grid.get_cells_by_distance(start_cell=cell, distance=distance)
 			for cell_coord in cell_coords:
 				if isinstance(self.cards[cell_coord], CreatureCard):
 					self.cards[cell_coord].apply_buff(power=1,max_health=1)
@@ -2081,13 +2072,13 @@ class Board:
 					if card_1:
 						self.remove_card_from_board(front1_cell)
 					else:
-						game.change_health(-card_0.power, 1)
+						self.field.change_health(-card_0.power, 1)
 			if is_creature_1 and not is_creature_0:
 				if card_1.active:
 					if card_0:
 						self.remove_card_from_board(front0_cell)
 					else:
-						game.change_health(-card_1.power, 0)
+						self.field.change_health(-card_1.power, 0)
 
 			if not is_creature_0 and not is_creature_1:
 				pass
@@ -2109,7 +2100,11 @@ class Board:
 		# (Old) Drawing the mana text number in each cell
 		for i, mana in np.ndenumerate(self.red_mana):
 			mana_surface = count_font.render(str(mana), True, red)
-			self.grid.draw_surface_in_cell(mana_surface, i, align=('right', 'down'), offset=(-2,-2))
+			if self.field.player_number == 0:
+				cell = i
+			else:
+				cell = (i[0],self.grid.dimensions[1]-1-i[1])
+			self.grid.draw_surface_in_cell(mana_surface, cell, align=('right', 'down'), offset=(-2,-2))
 
 try:
 	if sys.argv[2] == 'l':
