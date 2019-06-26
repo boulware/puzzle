@@ -1477,6 +1477,11 @@ class Field(GameState):
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 		self.cards_played = 0 # Tracks number of cards played on current turn
 
+		self.player_healths = [20,20]
+		self.hp_text_offset = (10,0)
+
+
+
 		self.phase = Phase(['Begin','Main 1','Attack','Main 2','End'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
 
@@ -1489,6 +1494,28 @@ class Field(GameState):
 									align=('right','up'),
 									font=ui_font,
 									text="End Turn")
+
+		if player_number == 0:
+			self.player_health_labels = [
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=self.hp_text_offset),
+					font=ui_font,
+					text='Player 0: %s'%self.player_healths[0]),
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=self.hp_text_offset),
+					font=ui_font,
+					text='Player 1: %s'%self.player_healths[1])
+			]
+		elif player_number == 1:
+			self.player_health_labels = [
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=self.hp_text_offset),
+					font=ui_font,
+					text='Player 0: %s'%self.player_healths[0]),
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=self.hp_text_offset),
+					font=ui_font,
+					text='Player 1: %s'%self.player_healths[1])
+			]
+
+		self.ui_elements.append(self.turn_button)
+		self.ui_elements += self.player_health_labels
 
 
 		self.input_map = {
@@ -1505,6 +1532,16 @@ class Field(GameState):
 		}
 
 		self.queued_network_data = []
+
+	def change_health(self, amount, player):
+		if player == 0 or player == 1:
+			self.player_healths[player] += amount
+			self.player_health_labels[player].text = 'Player %d: %d'%(player, self.player_healths[player])
+			if self.is_current_player_active():
+				send_string = 'health changed;' + str(amount) + ';' + str(player)
+				self.queued_network_data.append(send_string.encode('utf-8'))
+		else:
+			print("Tried to change health of invalid player.")
 
 	@property
 	def active_hand(self):
@@ -1618,6 +1655,8 @@ class Field(GameState):
 				self.set_active_player(int(args[1]))
 			if args[0] == 'phase advanced':
 				self.phase.name = args[1]
+			if args[0] == 'health changed':
+				self.change_health(int(args[1]), int(args[2]))
 		except:
 			pass
 
@@ -1645,6 +1684,7 @@ class Field(GameState):
 		self.turn_button.update(dt, mouse_pos)
 
 	def draw(self):
+		super().draw()
 		self.board.draw(player_perspective=self.player_number)
 
 		for i, card in enumerate(self.active_hand):
@@ -1681,7 +1721,6 @@ class Field(GameState):
 							int(self.hand_origin[1] + offset[1] + active_player_text_surface.get_height()//2)),
 						15, 1)
 
-		self.turn_button.draw()
 		#@self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
 		self.turn_display.draw(pos=self.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)))
 
@@ -1707,7 +1746,7 @@ class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
-		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: game.change_health(1, self.owner)])
+		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: field.change_health(1, self.owner)])
 		mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self, field: field.board.add_mana(1, 'red', self.pos, 1)])
 		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
 		morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self, field: field.board.buff_creatures_in_range(power=1,max_health=1,pos=self.pos,distance=2)])
@@ -1716,10 +1755,6 @@ class Game:
 		self.card_pool.add_card(mountain_card_prototype)
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(morale_card_prototype)
-
-		self.player_healths = [20,20]
-		self.__refresh_hp_surfaces()
-		self.hp_text_offset = (10,0)
 
 		self.selector = None
 		self.socket = None
@@ -1870,13 +1905,6 @@ class Game:
 		else:
 			return False
 
-	def change_health(self, amount, player):
-		if self.is_valid_player(player):
-			self.player_healths[player] += amount
-			self.__refresh_hp_surfaces()
-		else:
-			print("Tried to change health of invalid player.")
-
 	@property
 	def board(self):
 		if isinstance(self.state, Field):
@@ -1899,11 +1927,6 @@ class Game:
 					element.draw()
 			else:
 				element.draw()
-
-		if isinstance(self.state, Field):
-#			self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
-			draw_surface_aligned(target=screen, source=self._bottom_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
-			draw_surface_aligned(target=screen, source=self._top_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
 
 
 class Board:
