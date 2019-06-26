@@ -12,12 +12,13 @@ from functools import partial
 black = (0,0,0)
 grey = (127,127,127)
 light_grey = (200,200,200)
-dark_grey = (30,30,30)
+dark_grey = (40,40,40)
 white = (255,255,255)
 red = (255,0,0)
 dark_red = (70,0,0)
 green = (0,255,0)
 light_green = (0,150,0)
+dark_green = (0,70,0)
 blue = (0,0,255)
 dark_blue = (0,0,70)
 gold = (255,215,0)
@@ -573,69 +574,95 @@ class Hand:
 	def clear_hand(self):
 		self.cards = []
 
-Phases = {	"Begin":	0,
-			"Main 1":	1,
-			"Attack":	2,
-			"Main 2":	3,
-			"End":	 	4,
-			0: "Begin",
-			1: "Main 1",
-			2: "Attack",
-			3: "Main 2",
-			4: "End"}
+phases_old	 = {	0: "Begin",
+					1: "Main 1",
+					2: "Attack",
+					3: "Main 2",
+					4: "End"}
+
+class Phase:
+	def __init__(self, phase_names=[], initial_phase_ID=0):
+		self.names = phase_names
+		self.ID = initial_phase_ID
+		self.turn_ended = False
+	
+	def __iter__(self):
+		return iter(self.names)
+
+	@property
+	def ID(self):
+		return self._ID
+
+	@ID.setter
+	def ID(self, new_ID):
+		self._ID = new_ID
+
+		if new_ID == len(self.names):
+			turn_ended = True
+		else:
+			self._name = self.names[new_ID]
+
+	@property
+	def name(self):
+		return self._name
+
+	@name.setter
+	def name(self, new_name):
+		for ID, name in enumerate(self.names):
+			if new_name == name:
+				self.ID = ID # name is autoset by @ID.setter
+
+	# Return True if advanced past the last phase,
+	# Return False otherwise
+	def advance_phase(self):
+		if not self.turn_ended:
+			self.ID += 1
+
+			if self.ID >= len(self.names):
+				return True
+			else:
+				return False
+		else:
+			return True
+
+	def end_turn(self):
+		self.turn_ended = False
+		self.ID = 0
 
 line_spacing = 9
 
 class TurnDisplay:
-	def __init__(self):
-		self.phase = "Begin"
-		self.phase_text = None
-		self.__generate_phase_text()
-
-	def set_active_phase(self, phase):
+	def __init__(self, phase, font):
+		self.font = font
 		self.phase = phase
-		self.__generate_phase_text()
 
-	def __generate_phase_text(self):
-		begin_color, main1_color, attack_color, main2_color, end_color = white, white, white, white, white
+	@property
+	def phase(self):
+		return self._phase
 
-		if self.phase == "Begin":
-			begin_color = green
-		elif self.phase == "Main 1":
-			main1_color = green
-		elif self.phase == "Attack":
-			attack_color = green
-		elif self.phase == "Main 2":
-			main2_color = green
-		elif self.phase == "End":
-			end_color = green
+	@phase.setter
+	def phase(self, new_phase):
+		self._phase = new_phase
+		self._generate_phase_texts()
+	
+	def _generate_phase_texts(self):
+		self.phase_texts = []
+		self.phase_active_texts = []
 
-		begin_text = ui_font.render("Begin", True, begin_color)
-		main1_text = ui_font.render("Main 1", True, main1_color)
-		attack_text = ui_font.render("Attack", True, attack_color)
-		main2_text = ui_font.render("Main 2", True, main2_color)
-		end_text = ui_font.render("End", True, end_color)
+		for name in self.phase.names:
+			self.phase_texts.append(self.font.render(name, True, white))
+			self.phase_active_texts.append(self.font.render(name, True, green))
 
-		if self.phase_text == None:
-			sum_heights = 24*5 + line_spacing*4
-			max_width = max(begin_text.get_width(), attack_text.get_width(), end_text.get_width())
-			self.phase_text = pg.Surface((max_width, sum_heights + line_spacing*4))
-			self.phase_text.set_colorkey(black)
-		else:
-			self.phase_text.fill(black)
+	def draw(self, pos):
+		line_spacing = self.font.get_linesize()
+		for phase_ID, _ in enumerate(self.phase):
+			if phase_ID == self.phase.ID:
+				text_set = self.phase_active_texts # Draw from the active text set
+			else:
+				text_set = self.phase_texts # Draw from non-active text set
 
-		self.phase_text.blit(begin_text, (0,0))
-		self.phase_text.blit(main1_text, (0,(24+line_spacing)*1))
-		self.phase_text.blit(attack_text, (0,(24+line_spacing)*2))
-		self.phase_text.blit(main2_text, (0,(24+line_spacing)*3))
-		self.phase_text.blit(end_text, (0,(24+line_spacing)*4))
+			screen.blit(text_set[phase_ID], (pos[0],pos[1]+line_spacing*phase_ID))
 
-	def draw(self, pos, align):
-		draw_surface_aligned(target=screen, source=self.phase_text, pos=pos, align=align)
-
-# class GameState(Enum):
-# 	MainMenu = auto()
-# 	Field = auto()
 
 class InputMap:
 	def __init__(self, actions):
@@ -650,17 +677,22 @@ class Button:
 					pos, font,
 					align=('left','top'),
 					text='',
+					bg_colors={'default': black, 'hovered': dark_grey, 'pressed': green},
+					text_colors={'default': white, 'hovered': white, 'pressed': white},
 					padding=(10,0)):
 		self.pos = pos
 		self.font = font
 		self.text = text
 		self.padding = padding
 		self.align = align
+		self.bg_colors = bg_colors
+		self.text_colors = text_colors
 
 		self.width = self.font.size(text)[0] + self.padding[0]*2
 		self.height = self.font.size(text)[1] + self.padding[1]*2
 
 		self._hovered = False
+		self._pressed = False
 
 		self._generate_surfaces()
 
@@ -682,27 +714,16 @@ class Button:
 			offset_y -= self.height
 
 		return pg.Rect((self.pos[0]+offset_x, self.pos[1]+offset_y), self.size)
-	
+
 	def _generate_surfaces(self):
-		self._generate_box_surface()	
-		self._generate_text_surface()
+		self.surfaces = {	'default': pg.Surface(self.size),
+							'hovered': pg.Surface(self.size),
+							'pressed': pg.Surface(self.size)}
 
-	def _generate_box_surface(self):
-		self.box_surface = pg.Surface(self.size)
-
-		bg_color = dark_grey
-		if self.hovered:
-			bg_color = light_green
-
-		pg.draw.rect(self.box_surface, bg_color, ((0,0),self.size))
-		pg.draw.rect(self.box_surface, white, ((0,0),self.size),1)
-
-	def _generate_text_surface(self):
-		text_color = light_grey
-		if self.hovered:
-			text_color = white
-
-		self.text_surface = self.font.render(self.text, True, text_color)
+		for key, surface in self.surfaces.items():
+			pg.draw.rect(surface, self.bg_colors[key], ((0,0),self.size))
+			pg.draw.rect(surface, white, ((0,0),self.size),1)
+			surface.blit(self.font.render(self.text, True, self.text_colors[key]), self.padding)
 
 	@property
 	def hovered(self):
@@ -710,33 +731,48 @@ class Button:
 
 	@hovered.setter
 	def hovered(self, hovered):
-		value_changed = False
-		if self._hovered != hovered:
-			value_changed = True
-
 		self._hovered = hovered
 
-		if value_changed:
-			self._generate_surfaces()
+	@property
+	def pressed(self):
+		return self._pressed
 
+	@pressed.setter
+	def pressed(self, pressed):
+		self._pressed = pressed
 	
+	def left_mouse_pressed(self, mouse_pos):
+		if self.rect.collidepoint(mouse_pos):
+			self.pressed = True
+
+	def left_mouse_released(self, mouse_pos):
+		button_pressed = self.pressed
+		self.pressed = False
+
+		return button_pressed
 
 	def update(self, dt, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
 			self.hovered = True
 		else:
 			self.hovered = False
+			self.pressed = False
+
+	@property
+	def state(self):
+		_state = 'default'
+		if self.pressed:
+			_state = 'pressed'
+		elif self.hovered:
+			_state = 'hovered'
+
+		return _state
 
 	def draw(self):
 		draw_offset = draw_surface_aligned(	target=screen,
-											source=self.box_surface,
+											source=self.surfaces[self.state],
 											pos=self.pos,
 											align=self.align)
-
-		draw_surface_aligned(	target=screen,
-								source=self.text_surface,
-								pos=(self.pos[0]+draw_offset[0]+self.padding[0], self.pos[1]+draw_offset[1]+self.padding[1]))
-
 
 class TextEntry:
 	def __init__(	self,
@@ -1172,7 +1208,7 @@ class MainMenu(GameState):
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_SPACE): lambda _: self.keyboard_select_menu_item(),
 			Input(key=pg.K_RETURN): lambda _: self.keyboard_select_menu_item(),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(key=pg.K_ESCAPE): lambda _: sys.exit(),
 			Input(key=pg.K_UP): lambda _: self.list_menu.move_cursor_up(),
 			Input(key=pg.K_w): lambda _: self.list_menu.move_cursor_up(),
@@ -1210,7 +1246,7 @@ class MainMenu(GameState):
 		elif selected == 'Exit':
 			sys.exit()
 
-	def left_mouse_press(self, mouse_pos):
+	def left_mouse_pressed(self, mouse_pos):
 		if self.list_menu.check_mouse_inside(mouse_pos):
 			return self.activate_menu()
 
@@ -1287,7 +1323,9 @@ class Field(GameState):
 			hand.add_card("Morale")
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
-		self.shown_hand = 0 # Player 'id' of the player whose hand is currently being displayed
+
+		self.phase = Phase(['Begin','Main 1','Attack','Main 2','End'])
+		self.turn_display = TurnDisplay(self.phase, ui_font)
 
 		self.hand_origin = Vec(10,620)
 		self.hand_spacing = Vec(110,0)
@@ -1302,37 +1340,37 @@ class Field(GameState):
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_press(mouse_pos),
-			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_release(mouse_pos),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
+			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_press(mouse_pos),
-			Input(key=pg.K_SPACE): lambda mouse_pos: game.advance_turn(),
-			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.shown_hand].add_card("Mountain"),
-			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.shown_hand].add_card("Goblin"),
-			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.shown_hand].add_card("Morale"),
-			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.shown_hand].clear_hand(),
-			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu(),
-			Input(key=pg.K_TAB): lambda _: self.swap_hands()
+			Input(key=pg.K_SPACE): lambda mouse_pos: self._advance_turn(),
+			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.player_turn].add_card("Mountain"),
+			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
+			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.player_turn].add_card("Morale"),
+			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.player_turn].clear_hand(),
+			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu()
 		}
 
 	@property
 	def active_hand(self):
-		return self.hands[self.shown_hand]
+ 		return self.hands[self.player_turn]
 
 	@property
 	def hand_rect(self):
 		return pg.Rect(self.hand_origin, (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
 	
-	def left_mouse_press(self, mouse_pos):
-		if not self.hand_rect.collidepoint(mouse_pos):
-			return
-		pos_relative_to_hand = Vec(mouse_pos) - self.hand_origin
-		clicked_card_index = int(pos_relative_to_hand[0] // (hand_card_size + self.hand_origin)[0])
+	def left_mouse_pressed(self, mouse_pos):
+		if self.hand_rect.collidepoint(mouse_pos): # mouse is hovering hand
+			pos_relative_to_hand = Vec(mouse_pos) - self.hand_origin
+			clicked_card_index = int(pos_relative_to_hand[0] // (hand_card_size + self.hand_origin)[0])
 
-		if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
-			self.drag_card = self.active_hand.pop_card(clicked_card_index)
-			self.card_grab_point = pos_relative_to_hand - (clicked_card_index*(hand_card_size + self.hand_origin)[0],0)
+			if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
+				self.drag_card = self.active_hand.pop_card(clicked_card_index)
+				self.card_grab_point = pos_relative_to_hand - (clicked_card_index*(hand_card_size + self.hand_origin)[0],0)
 
-	def left_mouse_release(self, mouse_pos):
+		self.turn_button.left_mouse_pressed(mouse_pos)
+
+	def left_mouse_released(self, mouse_pos):
 		if self.drag_card:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
@@ -1346,16 +1384,41 @@ class Field(GameState):
 				self.active_hand.add_card(name=self.drag_card.name)
 			
 			self.drag_card = None
-			self.card_grab_point = None # Probably not necessary 
+			self.card_grab_point = None # Probably not necessary
+
+		if self.turn_button.left_mouse_released(mouse_pos): # if button was pressed
+			self._end_turn()
+
 			
 	def right_mouse_press(self, mouse_pos):
 		self.board.right_mouse_press(mouse_pos)
 
-	def swap_hands(self):
-		if self.shown_hand == 1:
-			self.shown_hand = 0
-		else:
-			self.shown_hand = 1
+	def _end_turn(self):
+		self.phase.end_turn()
+
+		if self.player_turn == 0:
+			self.player_turn = 1
+		elif self.player_turn == 1:
+			self.player_turn = 0
+
+	def _advance_turn(self):
+		if self.phase.name == "Begin":
+			self.board.do_begin_phase()
+		elif self.phase.name == "Main 1":
+			pass
+		elif self.phase.name == "Attack":
+			self.board.do_attack_phase()
+		elif self.phase.name == "Main 2":
+			pass
+		elif self.phase.name == "End":
+			pass
+
+		self._advance_phase()
+
+	def _advance_phase(self):
+		end_of_turn = self.phase.advance_phase()
+		if end_of_turn:
+			self._end_turn()
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		pass
@@ -1391,25 +1454,35 @@ class Field(GameState):
 
 			card.draw(pos=self.hand_origin + i*self.hand_spacing, location='hand', hover=hover)
 
-		if self.shown_hand == 0:
+		if self.player_turn == 0:
 			active_player_color = red
 		else:
 			active_player_color = blue
 		
-		active_player_text = "Player %d"%self.shown_hand
+		active_player_text = "Player %d"%self.player_turn
 		text_h_padding = 10
 		text_size = ui_font.size(active_player_text)
 		padded_size = (text_size[0]+2*text_h_padding, text_size[1])
 		active_player_text_surface = pg.Surface(padded_size)
 		pg.draw.rect(active_player_text_surface, white, ((0,0),(padded_size)))
 		active_player_text_surface.blit(ui_font.render(active_player_text, True, active_player_color), (text_h_padding,0))
-		draw_surface_aligned(	target=screen,
-								source=active_player_text_surface,
-								pos=self.hand_origin,
-								align=('left','down'),
-								offset=(0,-10))
+		offset = draw_surface_aligned(	target=screen,
+										source=active_player_text_surface,
+										pos=self.hand_origin,
+										align=('left','down'),
+										offset=(0,-10))
+		pg.draw.circle(screen, active_player_color,
+						(	int(self.hand_origin[0] + offset[0] + active_player_text_surface.get_width() + 20),
+							int(self.hand_origin[1] + offset[1] + active_player_text_surface.get_height()//2)),
+						15)
+		pg.draw.circle(screen, white,
+						(	int(self.hand_origin[0] + offset[0] + active_player_text_surface.get_width() + 20),
+							int(self.hand_origin[1] + offset[1] + active_player_text_surface.get_height()//2)),
+						15, 1)
 
 		self.turn_button.draw()
+		#@self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
+		self.turn_display.draw(pos=self.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)))
 
 		if self.drag_card:
 			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
@@ -1443,13 +1516,6 @@ class Game:
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(morale_card_prototype)
 
-
-		self.turn_display = TurnDisplay()
-
-		self._turn_number = 0
-		self.__start_turn()
-		self.__refresh_turn_surface()
-
 		self.player_healths = [20,20]
 		self.__refresh_hp_surfaces()
 		self.hp_text_offset = (10,0)
@@ -1479,40 +1545,10 @@ class Game:
 		else:
 			print("Tried to change health of invalid player.")
 
-	def __start_turn(self):
-		self._phase_name = "Begin"
-		self._phase_number = Phases[self._phase_name]
-		self.turn_display.set_active_phase(self._phase_name)
-
-	def __advance_phase(self):
-		# We do a blind advance phase, and rely on something else to fix it if it goes past the end phase
-		self._phase_number += 1
-		self._phase_name = Phases[self._phase_number]
-		self.turn_display.set_active_phase(self._phase_name)
-
 	@property
 	def board(self):
 		if isinstance(self.state, Field):
 			return self.state.board
-
-	# TODO: Move this to Field (probably)
-	def advance_turn(self):
-		if self.board:
-			if self._phase_name == "Begin":
-				self.board.do_begin_phase()
-				self.__advance_phase()
-			elif self._phase_name == "Main 1":
-				self.__advance_phase()
-			elif self._phase_name == "Attack":
-				self.board.do_attack_phase()
-				self.__advance_phase()
-			elif self._phase_name == "Main 2":
-				self.__advance_phase()
-			elif self._phase_name == "End":
-				self._turn_number += 1
-				self.__start_turn()
-
-			self.__refresh_turn_surface()
 
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		state = self.state.handle_input(input, mouse_pos, mod, unicode_key)
@@ -1526,7 +1562,7 @@ class Game:
 		self.state.draw()
 
 		if isinstance(self.state, Field):
-			self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
+#			self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
 			draw_surface_aligned(target=screen, source=self._bottom_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','down')), align=('left','down'), offset=self.hp_text_offset)
 			draw_surface_aligned(target=screen, source=self._top_hp_text, pos=self.state.board.grid.get_grid_pos(align=('right','up')), offset=self.hp_text_offset)
 
@@ -1555,7 +1591,7 @@ class Board:
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
 			self.cards[cell].owner = None
-			self.field.active_hand.add_card(name=self.cards[cell].name)
+			self.field.player_turn.add_card(name=self.cards[cell].name)
 			self.cards[cell] = None
 			self._refresh_passives()
 
