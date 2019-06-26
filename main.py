@@ -1292,7 +1292,7 @@ class MainMenu(GameState):
 		}
 
 
-		self.list_menu = ListMenu(	items=('Play', 'Host', 'Connect', 'Exit'),
+		self.list_menu = ListMenu(	items=('Start SP Game', 'Start MP Game', 'Host', 'Connect', 'Exit'),
 									pos=(screen_size[0]//2, screen_size[1]//2),
 									align=('center','center'),
 									text_align=('center'),
@@ -1310,8 +1310,14 @@ class MainMenu(GameState):
 
 	def activate_menu(self):
 		selected = self.list_menu.get_selected_item()
-		if selected == 'Play':
-			return Field(self.game)
+		if selected == 'Start SP Game':
+			return Field(self.game, 0)
+		elif selected == 'Start MP Game':
+			if self.game.connected == True:
+				if self.game.connection_role == 'host':
+					return Field(self.game, 0)
+				elif self.game.connection_role == 'client':
+					return Field(self.game, 1)
 		elif selected == 'Host':
 			return HostMenu(self.game)
 		elif selected == 'Connect':
@@ -1457,9 +1463,10 @@ class ConnectMenu(GameState):
 			element.update(dt, mouse_pos)
 
 class Field(GameState):
-	def __init__(self, game):
+	def __init__(self, game, player_number):
 		super().__init__(game)
 
+		self.player_number = player_number
 		self.board = Board(self, grid_count)
 		self.hands = {
 			0: Hand(self), # Hand for player 0
@@ -1505,7 +1512,7 @@ class Field(GameState):
 
 	@property
 	def active_hand(self):
- 		return self.hands[self.player_turn]
+ 		return self.hands[self.player_number]
 
 	@property
 	def hand_rect(self):
@@ -1522,19 +1529,26 @@ class Field(GameState):
 
 		self.turn_button.left_mouse_pressed(mouse_pos)
 
+	def is_current_player_active(self):
+		if self.player_turn == self.player_number:
+			return True
+		else:
+			return False
+
 	def left_mouse_released(self, mouse_pos):
 		if self.drag_card:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
-			result = self.board.grid.get_cell_at_mouse()
-			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				if self.cards_played < 1:
-					pos = result['cell']
-					if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
-						placed_in_board = self.board.place_card(result['cell'], self.drag_card)
-						send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1])
-						self.queued_network_data.append(send_string.encode('utf-8'))
-						self.cards_played += 1
+			if self.is_current_player_active():
+				result = self.board.grid.get_cell_at_mouse()
+				if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
+					if self.cards_played < 1:
+						pos = result['cell']
+						if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_turn:
+							placed_in_board = self.board.place_card(result['cell'], self.drag_card)
+							send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1])
+							self.queued_network_data.append(send_string.encode('utf-8'))
+							self.cards_played += 1
 			
 			if placed_in_board == False:
 				self.active_hand.add_card(name=self.drag_card.name)
@@ -1543,34 +1557,48 @@ class Field(GameState):
 			self.card_grab_point = None # Probably not necessary
 
 		if self.turn_button.left_mouse_released(mouse_pos): # if button was pressed
-			self._end_turn()
+			if self.is_current_player_active():
+				self._end_turn()
 	
 	def right_mouse_press(self, mouse_pos):
 		self.board.right_mouse_press(mouse_pos)
 
-	def _end_turn(self):
-		self.phase.end_turn()
+	def set_active_player(self, player_number):
+		self.player_turn = player_number
+		self._end_turn()
 
+	def swap_active_player(self):
 		if self.player_turn == 0:
 			self.player_turn = 1
 		elif self.player_turn == 1:
 			self.player_turn = 0
 
+	def _end_turn(self):
+		if self.is_current_player_active():
+			send_string = 'turn ended;' + str(self.player_turn)
+			self.queued_network_data.append(send_string.encode('utf-8'))
+
+		self.phase.end_turn()
+		self.swap_active_player()
 		self.cards_played = 0
 
 	def _advance_turn(self):
-		if self.phase.name == "Begin":
-			self.board.do_begin_phase()
-		elif self.phase.name == "Main 1":
-			pass
-		elif self.phase.name == "Attack":
-			self.board.do_attack_phase()
-		elif self.phase.name == "Main 2":
-			pass
-		elif self.phase.name == "End":
-			pass
+		if self.is_current_player_active():
+			if self.phase.name == "Begin":
+				self.board.do_begin_phase()
+			elif self.phase.name == "Main 1":
+				pass
+			elif self.phase.name == "Attack":
+				self.board.do_attack_phase()
+			elif self.phase.name == "Main 2":
+				pass
+			elif self.phase.name == "End":
+				pass
 
-		self._advance_phase()
+			self._advance_phase()
+
+			send_string = 'phase advanced;' + str(self.phase.name)
+			self.queued_network_data.append(send_string.encode('utf-8'))
 
 	def _advance_phase(self):
 		end_of_turn = self.phase.advance_phase()
@@ -1587,17 +1615,15 @@ class Field(GameState):
 		try:
 			if args[0] == 'card placed':
 				self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
+			if args[0] == 'turn ended':
+				self.set_active_player(int(args[1]))
+			if args[0] == 'phase advanced':
+				self.phase.name = args[1]
 		except:
 			pass
-		#data[0] == 'F': # Data for field
 
 	def any_key_pressed(self, key, mod, unicode_key):
-		if key == pg.K_a:
-			self.queued_network_data.append(b'a')
-		elif key == pg.K_s:
-			self.queued_network_data.append(b's')
-		elif key == pg.K_d:
-			self.queued_network_data.append(b'd')
+		pass
 
 	def go_to_main_menu(self):
 		return MainMenu(self.game)
@@ -1778,12 +1804,13 @@ class Game:
 		if mask & selectors.EVENT_READ:
 			recv_data = sock.recv(1024)
 			if recv_data:
-				data.outb += recv_data
-				print('received', repr(data.outb))
-				self.state.process_network_data(data.outb)
+				#data.outb += recv_data
+				print('received', repr(recv_data))
+				self.state.process_network_data(recv_data)
 		elif mask & selectors.EVENT_WRITE:
+			data.outb = self.state.fetch_network_data()
 			if data.outb:
-				print('echoing', repr(data.outb), 'to', data.addr)
+				print('sending', repr(data.outb), 'to', data.addr)
 				sent = sock.send(data.outb)
 				data.outb = data.outb[sent:]
 
@@ -1794,7 +1821,8 @@ class Game:
 			recv_data = sock.recv(1024)  # Should be ready to read
 			if recv_data:
 				print("received", repr(recv_data), "from connection", data.connid)
-				data.recv_total += len(recv_data)
+				self.state.process_network_data(recv_data)
+#				data.recv_total += len(recv_data)
 		elif mask & selectors.EVENT_WRITE:
 			data.outb = self.state.fetch_network_data()
 			if data.outb:
