@@ -15,6 +15,7 @@ light_grey = (200,200,200)
 dark_grey = (40,40,40)
 white = (255,255,255)
 red = (255,0,0)
+light_red = (255,50,50)
 dark_red = (70,0,0)
 very_dark_red = (40,0,0)
 green = (0,255,0)
@@ -120,7 +121,6 @@ class Grid:
 			return 0
 
 	def get_cells_by_distance(self, start_cell, distance): # Using Chebyshev distance (King's distance)
-		print(start_cell, distance)
 		distance = max(0, distance) # Clamp distance to a non-negative value
 
 		start_x = start_cell[0]
@@ -1454,6 +1454,37 @@ class ConnectMenu(GameState):
 		for element in self.ui_elements:
 			element.update(dt, mouse_pos)
 
+def clamp(value, min_value, max_value):
+	clamped_value = value
+	if value < min_value:
+		clamped_value = min_value
+	elif value > max_value:
+		clamped_value = max_value
+
+	return clamped_value
+
+# Scales color towards (0,0,0), where amount is between 0 and 1 (1 taking it all the way to black)
+def darken_color(color, amount):
+	try:
+		new_color = list(color)
+		for i, channel in enumerate(new_color):
+			new_color[i] = clamp(channel*(1-amount), 0, 255)
+		return new_color
+	except:
+		print("Failed to darken color.")
+		return color
+
+# Scales color towards (0,0,0), where amount is between 0 and 1 (1 takes it all the way to white)
+def lighten_color(color, amount):
+	try:
+		new_color = list(color)
+		for i, channel in enumerate(new_color):
+			new_color[i] = clamp(channel + amount*(255-channel), 0, 255)
+		return new_color
+	except:
+		print("Failed to darken color.")
+		return color
+
 class Field(GameState):
 	def __init__(self, game, player_number):
 		super().__init__(game)
@@ -1475,13 +1506,14 @@ class Field(GameState):
 
 		self.player_healths = [20,20]
 		self.hp_text_offset = (10,0)
-
+		self.hand_area_height = 80
 
 
 		self.phase = Phase(['End'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
 
 		self.hand_origin = Vec(self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50)))
+		self.hand_center = Vec(screen_size[0]//2, screen_size[1]-100)
 		self.hand_spacing = Vec(110,0)
 		self.drag_card = None
 		self.card_grab_point = None
@@ -1543,16 +1575,24 @@ class Field(GameState):
 
 	@property
 	def hand_rect(self):
-		return pg.Rect(self.hand_origin, (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
+		card_coords = self.generate_hand_card_positions()
+		if len(card_coords) == 0:
+			hand_left = self.hand_center[0]
+		else:
+			hand_left = card_coords[0][0]
+		return pg.Rect((hand_left, self.hand_center[1]), (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
 	
 	def left_mouse_pressed(self, mouse_pos):
 		if self.hand_rect.collidepoint(mouse_pos): # mouse is hovering hand
-			pos_relative_to_hand = Vec(mouse_pos) - self.hand_origin
-			clicked_card_index = int(pos_relative_to_hand[0] // (hand_card_size + self.hand_origin)[0])
+			hand_left = self.get_left_side_of_hand()
+			relative_x = int((mouse_pos[0] - hand_left) % self.hand_spacing[0])
+			relative_y = int(mouse_pos[1] - self.hand_center[1])
+			clicked_card_index = int((mouse_pos[0] - hand_left) // self.hand_spacing[0])
 
-			if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
-				self.drag_card = self.active_hand.pop_card(clicked_card_index)
-				self.card_grab_point = pos_relative_to_hand - (clicked_card_index*(hand_card_size + self.hand_origin)[0],0)
+			if relative_x >= 0 and relative_x < hand_card_size[1]:
+				if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
+					self.drag_card = self.active_hand.pop_card(clicked_card_index)
+					self.card_grab_point = (relative_x,relative_y)
 
 		self.turn_button.left_mouse_pressed(mouse_pos)
 
@@ -1613,7 +1653,12 @@ class Field(GameState):
 		self.cards_played = 0
 
 	def _advance_turn(self):
-		if self.is_current_player_active():
+		# TODO: Hacky
+		do_advance = False
+		if self.game.connected == False or self.is_current_player_active():
+			do_advance = True
+
+		if do_advance:
 			if self.phase.name == "End":
 				self.board.do_begin_phase()
 				self.board.do_attack_phase()
@@ -1655,15 +1700,25 @@ class Field(GameState):
 		self.game.queue_network_data(send_string.encode('utf-8'))
 		return MainMenu(self.game)
 
+	def generate_hand_card_positions(self):
+		total_width = self.active_hand.card_count * self.hand_spacing[0]
+		return [Vec(self.hand_center[0]+i*self.hand_spacing[0]-total_width//2,self.hand_center[1]) for i in range(self.active_hand.card_count)]
+
+	def get_left_side_of_hand(self):
+		card_coords = self.generate_hand_card_positions()
+		if len(card_coords) == 0:
+			return self.hand_center[0]
+		else:
+			return card_coords[0][0]
+
 	def _generate_hovered_card_index(self, mouse_pos):
 		if self.hand_rect.collidepoint(mouse_pos):
-			relative_x = mouse_pos[0] - self.hand_rect.left # mouse_x relative to left side of hand
-			for card_index in range(self.active_hand.card_count):
-				card_left = card_index*self.hand_spacing[0] # left side of card (relative to left side of hand)
-				card_relative_x = relative_x - card_left # mouse_x relative to left side of nearest card
+			for i, card_pos in enumerate(self.generate_hand_card_positions()):
+				card_left = card_pos[0]
+				card_right = card_pos[0] + hand_card_size[0]
 
-				if card_relative_x > 0 and card_relative_x < hand_card_size[0]:
-					self.hovered_card_index = card_index
+				if mouse_pos[0] >= card_left and mouse_pos[0] < card_right:
+					self.hovered_card_index = i
 					return
 
 		self.hovered_card_index = None
@@ -1673,22 +1728,40 @@ class Field(GameState):
 		self.turn_button.update(dt, mouse_pos)
 
 	def draw(self):
+		if self.player_number == 0:
+			current_player_color = red
+		elif self.player_number == 1:
+			current_player_color = blue
+
+		if self.player_turn == 0:
+			active_player_color = red
+		elif self.player_turn == 1:
+			active_player_color = blue
+
+		# Draw board
 		super().draw()
 		self.board.draw(player_perspective=self.player_number)
 
-		for i, card in enumerate(self.active_hand):
+		# Draw card area on bottom of screen
+		pg.draw.rect(	screen, darken_color(current_player_color,0.65),
+						((0,screen_size[1]-self.hand_area_height),
+						(screen_size[0], self.hand_area_height))
+					)
+		pg.draw.line(	screen, lighten_color(current_player_color,0.5),
+						(0,screen_size[1]-self.hand_area_height),
+						(screen_size[0],screen_size[1]-self.hand_area_height)
+					)
+
+		# Draw cards in hand
+		for i, card_pos in enumerate(self.generate_hand_card_positions()):
 			if i == self.hovered_card_index:
 				hover = True
 			else:
 				hover = False
 
-			card.draw(pos=self.hand_origin + i*self.hand_spacing, location='hand', hover=hover)
+			self.active_hand[i].draw(pos=card_pos, location='hand', hover=(i==self.hovered_card_index))
 
-		if self.player_turn == 0:
-			active_player_color = red
-		else:
-			active_player_color = blue
-		
+		# Draw active player text and circle
 		active_player_text = "Player %d"%self.player_turn
 		text_h_padding = 10
 		text_size = ui_font.size(active_player_text)
@@ -1710,9 +1783,10 @@ class Field(GameState):
 							int(self.hand_origin[1] + offset[1] + active_player_text_surface.get_height()//2)),
 						15, 1)
 
-		#@self.turn_display.draw(self.state.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)), align=('left','center'))
+		# Draw turn display
 		self.turn_display.draw(pos=self.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)))
 
+		# Draw card being dragged
 		if self.drag_card:
 			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
 
@@ -2015,7 +2089,6 @@ class Board:
 		if cell:
 			if type == "red":
 				cell_coords = self.grid.get_cells_by_distance(start_cell=cell, distance=distance)
-				print('adding %d mana to '%amount, cell_coords)
 				for cell_coord in cell_coords:
 					self.red_mana[cell_coord] += amount
 
@@ -2117,7 +2190,7 @@ except:
 # pg setup
 pg.init()
 pg.key.set_repeat(300, 30)
-screen_size = (700,800)
+screen_size = (1200,800)
 screen = pg.display.set_mode(screen_size)
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
 card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
@@ -2137,7 +2210,7 @@ input = Input()
 start_state = lambda game_: MainMenu(game_)
 try:
 	if sys.argv[1] == 'field':
-		start_state = lambda game_: Field(game_)
+		start_state = lambda game_: Field(game_, 0)
 	elif sys.argv[1] == 'connect':
 		start_state = lambda game_: ConnectMenu(game_)
 	elif sys.argv[1] == 'host':
