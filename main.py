@@ -29,7 +29,7 @@ gold = (255,215,0)
 
 # Game parameters
 grid_count = (5,6)
-node_size = (80,80)
+node_size = (90,90)
 grid_origin = (100,10)
 
 class Node: 
@@ -1514,7 +1514,6 @@ class Field(GameState):
 		self.cards_played = 0 # Tracks number of cards played on current turn
 
 		self.player_healths = [20,20]
-		self.hp_text_offset = (10,0)
 		self.hand_area_height = 80
 
 
@@ -1527,26 +1526,26 @@ class Field(GameState):
 		self.drag_card = None
 		self.card_grab_point = None
 
-		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('right','down'),offset=(0,5)),
+		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
 									align=('right','up'),
 									font=ui_font,
 									text="End Turn")
 
 		if player_number == 0:
 			self.player_health_labels = [
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=self.hp_text_offset),
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=(10,-30)),
 					font=ui_font,
 					text='Player 0: %s'%self.player_healths[0]),
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=self.hp_text_offset),
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=(10,0)),
 					font=ui_font,
 					text='Player 1: %s'%self.player_healths[1])
 			]
 		elif player_number == 1:
 			self.player_health_labels = [
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=self.hp_text_offset),
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=(10,0)),
 					font=ui_font,
 					text='Player 0: %s'%self.player_healths[0]),
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=self.hp_text_offset),
+			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=(10,-50)),
 					font=ui_font,
 					text='Player 1: %s'%self.player_healths[1])
 			]
@@ -1741,8 +1740,10 @@ class Field(GameState):
 	def draw(self):
 		if self.player_number == 0:
 			current_player_color = red
+			other_player_color = blue
 		elif self.player_number == 1:
 			current_player_color = blue
+			other_player_color = red
 
 		if self.player_turn == 0:
 			active_player_color = red
@@ -1753,15 +1754,30 @@ class Field(GameState):
 		super().draw()
 		self.board.draw(player_perspective=self.player_number)
 
-		# Draw card area on bottom of screen
-		pg.draw.rect(	screen, darken_color(current_player_color,0.65),
+		# Calculate colors for card areas based on which player is active
+		if self.is_current_player_active():
+			my_card_area_color = darken_color(current_player_color,0.65)
+			other_card_area_color = dark_grey
+		else:
+			my_card_area_color = dark_grey
+			other_card_area_color = darken_color(other_player_color,0.65)
+
+		# Draw my card area
+		pg.draw.rect(	screen, my_card_area_color,
 						((0,screen_size[1]-self.hand_area_height),
 						(screen_size[0], self.hand_area_height))
 					)
-		pg.draw.line(	screen, lighten_color(current_player_color,0.5),
+		pg.draw.line(	screen, lighten_color(my_card_area_color,0.5),
 						(0,screen_size[1]-self.hand_area_height),
 						(screen_size[0],screen_size[1]-self.hand_area_height)
 					)
+		# Draw other card area
+		pg.draw.rect(	screen, other_card_area_color,
+						((0,0), (screen_size[0], self.hand_area_height)))
+		pg.draw.line(	screen, lighten_color(other_card_area_color,0.5),
+						(0, self.hand_area_height),
+						(screen_size[0], self.hand_area_height))
+
 
 		# Draw cards in hand
 		for i, card_pos in enumerate(self.generate_hand_card_positions()):
@@ -1780,18 +1796,18 @@ class Field(GameState):
 		active_player_text_surface = pg.Surface(padded_size)
 		pg.draw.rect(active_player_text_surface, white, ((0,0),(padded_size)))
 		active_player_text_surface.blit(ui_font.render(active_player_text, True, active_player_color), (text_h_padding,0))
+		draw_pos = (20, screen_size[1]//2)
 		offset = draw_surface_aligned(	target=screen,
 										source=active_player_text_surface,
-										pos=self.hand_origin,
-										align=('left','down'),
-										offset=(0,-10))
+										pos=draw_pos,
+										align=('left','down'))
 		pg.draw.circle(screen, active_player_color,
-						(	int(self.hand_origin[0] + offset[0] + active_player_text_surface.get_width() + 20),
-							int(self.hand_origin[1] + offset[1] + active_player_text_surface.get_height()//2)),
+						(	int(draw_pos[0] + offset[0] + active_player_text_surface.get_width() + 20),
+							int(draw_pos[1] + offset[1] + active_player_text_surface.get_height()//2)),
 						15)
 		pg.draw.circle(screen, white,
-						(	int(self.hand_origin[0] + offset[0] + active_player_text_surface.get_width() + 20),
-							int(self.hand_origin[1] + offset[1] + active_player_text_surface.get_height()//2)),
+						(	int(draw_pos[0] + offset[0] + active_player_text_surface.get_width() + 20),
+							int(draw_pos[1] + offset[1] + active_player_text_surface.get_height()//2)),
 						15, 1)
 
 		# Draw turn display
@@ -1844,11 +1860,11 @@ class Game:
 
 		self.ui_elements = []
 
-		self.connection_label = Label(	pos=(0,screen_size[1]),
-										font=main_menu_font_med,
+		self.connection_label = Label(	pos=(0,0),
+										font=main_menu_font_small,
 										text='',
 										text_color=green,
-										align=('left','down'))
+										align=('left','up'))
 
 
 
@@ -2008,12 +2024,12 @@ class Board:
 
 		self.size = size
 		self.cards = np.full(size, None, np.dtype(Card))
-		self.grid = Grid(dimensions=size, origin=(10,10), cell_size=node_size)
+		grid_origin = (screen_size[0]//2-int((size[0]*node_size[0])//2), screen_size[1]//2-int((size[1]*node_size[1])//2))
+		self.grid = Grid(dimensions=size, origin=grid_origin, cell_size=node_size)
 		self._reset_mana()
 
 	def place_card(self, cell, card):
 		if self.grid.check_cell_valid(cell) == True:
-			print('placed ', card.name, ' at ', cell)
 			card.cell = cell
 			card.owner = self.grid.get_cell_owner(cell)
 			self.cards[cell] = card
@@ -2071,7 +2087,6 @@ class Board:
 		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
 	def _refresh_passives(self):
-		print('passives refreshed')
 		dirty = False
 
 		for cell, card in np.ndenumerate(self.cards):
@@ -2211,6 +2226,7 @@ count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
 ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
 main_menu_font = pg.font.Font("Montserrat-Regular.ttf", 48)
 main_menu_font_med = pg.font.Font("Montserrat-Regular.ttf", 32)
+main_menu_font_small = pg.font.Font("Montserrat-Regular.ttf", 18)
 main_menu_selected_font = pg.font.Font("Montserrat-Regular.ttf", 60)
 
 # Game setup
