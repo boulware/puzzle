@@ -690,10 +690,13 @@ class InputMap:
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
+# class UI_Container:
+# 	def __init__()
+
 class UI_Element:
 	def __init__(self):
 		self.ui_elements = []
-	def key_pressed(self, key, mod, unicode_key):
+	def any_key_pressed(self, key, mod, unicode_key):
 		#self.key_pressed(key, mod, unicode_key)
 		for element in self.ui_elements:
 			element.key_pressed(key, mod, unicode_key)
@@ -1070,7 +1073,6 @@ class TextEntry(UI_Element):
 				return i
 
 	def left_mouse_pressed(self, mouse_pos):
-		print('TextEntry left_mouse_pressed')
 		if self.rect.collidepoint(mouse_pos):
 			self.selected = True
 
@@ -1889,7 +1891,20 @@ class Game:
 		self.ui_elements.append(self.connection_label)
 		self.ui_elements.append(self.chat_window)
 
+		self.input_map = {
+			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos)
+		}
+
 		self._state = start_state(self)
+
+	def left_mouse_pressed(self, mouse_pos):
+		for element in self.ui_elements:
+			element.left_mouse_pressed(mouse_pos)
+
+	def any_key_pressed(self, key, mod, unicode_key):
+		for element in self.ui_elements:
+			element.any_key_pressed(key, mod, unicode_key)
 
 	@property
 	def state(self):
@@ -1899,7 +1914,6 @@ class Game:
 	def state(self, new_state):
 		self._state = new_state
 	
-
 	def start_host(self, port):
 		self.selector = selectors.DefaultSelector()
 		host = '0.0.0.0'
@@ -2019,9 +2033,12 @@ class Game:
 			return self.state.board
 
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
-		state = self.state.handle_input(input, mouse_pos, mod, unicode_key)
-		if state:
-			self.state = state
+		if input in self.input_map:
+			self.input_map[input](mouse_pos)
+		else:
+			self.input_map[Input(key='any')](input.key, mod, unicode_key)
+
+		self.state.handle_input(input, mouse_pos, mod, unicode_key)
 
 	def update(self, dt, mouse_pos):
 		self.select()
