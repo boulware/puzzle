@@ -1571,9 +1571,6 @@ class Field(GameState):
 		if player == 0 or player == 1:
 			self.player_healths[player] += amount
 			self.player_health_labels[player].text = 'Player %d: %d'%(player, self.player_healths[player])
-			if self.is_current_player_active():
-				send_string = 'health changed;' + str(amount) + ';' + str(player) + ';[END]'
-				self.game.queue_network_data(send_string.encode('utf-8'))
 		else:
 			print("Tried to change health of invalid player.")
 
