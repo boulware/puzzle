@@ -15,7 +15,7 @@ light_grey = (200,200,200)
 dark_grey = (40,40,40)
 white = (255,255,255)
 red = (255,0,0)
-light_red = (255,50,50)
+light_red = (255,100,100)
 dark_red = (70,0,0)
 very_dark_red = (40,0,0)
 green = (0,255,0)
@@ -23,6 +23,7 @@ light_green = (0,150,0)
 dark_green = (0,70,0)
 very_dark_green = (0,40,0)
 blue = (0,0,255)
+light_blue = (100,100,255)
 dark_blue = (0,0,70)
 very_dark_blue = (0,0,40)
 gold = (255,215,0)
@@ -690,19 +691,29 @@ class InputMap:
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
 class UI_Element:
+	def __init__(self):
+		self.ui_elements = []
 	def key_pressed(self, key, mod, unicode_key):
-		pass
+		#self.key_pressed(key, mod, unicode_key)
+		for element in self.ui_elements:
+			element.key_pressed(key, mod, unicode_key)
 	def left_mouse_pressed(self, mouse_pos):
-		pass
+		#self.left_mouse_pressed(mouse_pos)
+		for element in self.ui_elements:
+			element.left_mouse_pressed(mouse_pos)
 	def left_mouse_released(self, mouse_pos):
-		pass
+		for element in self.ui_elements:
+			element.left_mouse_released(mouse_pos)
 	def update(self, dt, mouse_pos):
-		pass
+		for element in self.ui_elements:
+			element.update(dt, mouse_pos)
 	def draw(self):
-		pass
+		for element in self.ui_elements:
+			element.draw()
 
 class Label(UI_Element):
 	def __init__(self, pos, font, align=('left','top'), text_color=white, text=''):
+		super().__init__()
 		self.pos = pos
 		self.font = font
 		self.align = align
@@ -736,6 +747,7 @@ class Button(UI_Element):
 					bg_colors={'default': black, 'hovered': dark_grey, 'pressed': green},
 					text_colors={'default': white, 'hovered': white, 'pressed': white},
 					padding=(10,0)):
+		super().__init__()
 		self.pos = pos
 		self.font = font
 		self.text = text
@@ -840,6 +852,7 @@ class TextEntry(UI_Element):
 					text_cursor_scale=0.75, cursor_blink_time=750,
 					padding=(5,0),
 					default_text=''):
+		super().__init__()
 		self.pos = pos
 		self.width = width
 		self.type = type
@@ -1057,6 +1070,7 @@ class TextEntry(UI_Element):
 				return i
 
 	def left_mouse_pressed(self, mouse_pos):
+		print('TextEntry left_mouse_pressed')
 		if self.rect.collidepoint(mouse_pos):
 			self.selected = True
 
@@ -1134,6 +1148,7 @@ class TextEntry(UI_Element):
 
 class ListMenu(UI_Element):
 	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0):
+		super().__init__()
 		self.items = items
 		self.pos = pos
 		self.align = align
@@ -1863,9 +1878,16 @@ class Game:
 										text_color=green,
 										align=('left','up'))
 
+		self.chat_window = ChatWindow(	name_font=chat_name_font,
+										message_font=chat_message_font,
+										name_width=75,
+										message_width=400,
+										height=150)
+
 
 
 		self.ui_elements.append(self.connection_label)
+		self.ui_elements.append(self.chat_window)
 
 		self._state = start_state(self)
 
@@ -2013,6 +2035,100 @@ class Game:
 					element.draw()
 			else:
 				element.draw()
+
+def split_text(text, font, word_wrap_width):
+		lines = []
+
+		split_text = text.split(' ')
+		current_line = ''
+		for i, word in enumerate(split_text):
+			if i == 0:
+				line_width = font.size(word)[0]
+			else:
+				line_width = font.size(current_line + ' ' + word)[0]
+			if line_width >= word_wrap_width:
+				lines.append(current_line)
+				current_line = word
+			else:
+				if i == 0:
+					current_line += word
+				else:
+					current_line += ' ' + word
+
+		if len(current_line) > 0:
+			lines.append(current_line)
+
+		return lines
+
+def draw_text(text, pos, font, color=white, word_wrap=False, word_wrap_width=None):
+	if len(text) == 0:
+		line_count = 0
+	if word_wrap == False:
+		text_surface = font.render(text, True, color)
+		line_count = 1
+	else:
+		line_spacing = font.get_linesize()
+		lines = split_text(text, font, word_wrap_width=word_wrap_width)
+		line_count = len(lines)
+		text_surface = pg.Surface((word_wrap_width, line_spacing*line_count))
+
+		for line_number, line in enumerate(lines):
+			text_surface.blit(font.render(line, True, color), (0,line_number*line_spacing))
+
+	screen.blit(text_surface, pos)
+
+	return line_count
+
+
+class ChatWindow(UI_Element):
+	def __init__(self, name_font, message_font, name_width, message_width, height, text_color=white):
+		super().__init__()
+		self.pos = (10,0)
+		self.name_font = name_font
+		self.message_font = message_font
+		self.name_width = name_width
+		self.message_width = message_width
+		self.height = height
+		self.text_color = text_color
+		self.user_colors = {"Tyler": light_red, "Simon": light_blue}
+		self.messages = [	("Tyler", "What's up?"),
+							("Simon", "WATS UP"),
+							("Tyler", "i was just asfasjdfl jfkds jf fskdlfjlk sdklfj sfs d jsdfk jsdlf jdkfj lsd  ksdf?"),
+							("Tyler", "idk"),
+							("Simon", "ye i gues so :3")]
+
+		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.height),
+									font=message_font,
+									type='chat',
+									width=message_width+name_width)
+
+		self.ui_elements.append(self.text_entry)
+
+	def update(self, dt, mouse_pos):
+		self.text_entry.update(dt, mouse_pos)
+
+	def draw(self):
+		self.text_entry.draw()
+
+		line_spacing = self.message_font.get_linesize() + 4
+		current_line_count = 0
+
+		for message in self.messages[::-1]: # Look through messages backwards, since we only show the most recent ones
+			this_line_count = len(split_text(text=message[1], font=self.message_font, word_wrap_width=self.message_width))
+			current_line_count += this_line_count
+			draw_text(	text=message[0],
+						pos=(self.pos[0], self.pos[1] + self.height - current_line_count*line_spacing),
+						font=self.name_font,
+						color = self.user_colors[message[0]],
+						word_wrap = False)
+			draw_text(	text=message[1],
+						pos=(self.name_width + self.pos[0], self.pos[1] + self.height - current_line_count*line_spacing),
+						font = self.message_font,
+						color = lighten_color(self.user_colors[message[0]], 0.5),
+						word_wrap = True,
+						word_wrap_width = self.message_width)
+
+
 
 
 class Board:
@@ -2224,6 +2340,8 @@ ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
 main_menu_font = pg.font.Font("Montserrat-Regular.ttf", 48)
 main_menu_font_med = pg.font.Font("Montserrat-Regular.ttf", 32)
 main_menu_font_small = pg.font.Font("Montserrat-Regular.ttf", 18)
+chat_message_font = pg.font.Font("Montserrat-Regular.ttf", 15)
+chat_name_font = pg.font.Font("Montserrat-Bold.ttf", 15)
 main_menu_selected_font = pg.font.Font("Montserrat-Regular.ttf", 60)
 
 # Game setup
