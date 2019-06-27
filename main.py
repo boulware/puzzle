@@ -614,8 +614,8 @@ class Phase:
 	def ID(self, new_ID):
 		self._ID = new_ID
 
-		if new_ID == len(self.names):
-			turn_ended = True
+		if new_ID >= len(self.names):
+			self.turn_ended = True
 		else:
 			self._name = self.names[new_ID]
 
@@ -1241,23 +1241,31 @@ class GameState:
 	def __init__(self, game):
 		self.game = game
 		self.ui_elements = []
+		self.target_state = None
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
-		state = None
 		if input in self.input_map:
-			state = self.input_map[input](mouse_pos)
+			self.input_map[input](mouse_pos)
+		else:
+			self.input_map[Input(key='any')](input.key, mod, unicode_key)
+		if self.target_state:
+			return self.target_state
+		# state = None
+		# if input in self.input_map:
+		# 	state = self.input_map[input](mouse_pos)
 
-		if state != None:
-			return state 	# if we have a state change, go ahead and return,
-		else:				# but if not, let's check the 'any key' event:
-			if input.key:
-				state = self.input_map[Input(key='any')](input.key, mod, unicode_key)
+		# if state != None:
+		# 	return state 	# if we have a state change, go ahead and return,
+		# else:				# but if not, let's check the 'any key' event:
+		# 	if input.key:
+		# 		state = self.input_map[Input(key='any')](input.key, mod, unicode_key)
 	def update(self, dt, mouse_pos):
 		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
 	def draw(self):
 		for element in self.ui_elements:
 			element.draw()
-
+	def transition_state(self, new_state):
+		self.target_state = new_state
 	def fetch_network_data(self):
 		pass
 	def process_network_data(self, data):
@@ -1303,17 +1311,17 @@ class MainMenu(GameState):
 	def activate_menu(self):
 		selected = self.list_menu.get_selected_item()
 		if selected == 'Start SP Game':
-			return Field(self.game, 0)
+			self.transition_state(Field(self.game, 0, 'SP'))
 		elif selected == 'Start MP Game':
 			if self.game.connected == True:
 				if self.game.connection_role == 'host':
-					return Field(self.game, 0)
+					self.transition_state(Field(self.game, 0, 'MP'))
 				elif self.game.connection_role == 'client':
-					return Field(self.game, 1)
+					self.transition_state(Field(self.game, 1, 'MP'))
 		elif selected == 'Host':
-			return HostMenu(self.game)
+			self.transition_state(HostMenu(self.game))
 		elif selected == 'Connect':
-			return ConnectMenu(self.game)
+			self.transition_state(ConnectMenu(self.game))
 		elif selected == 'Exit':
 			sys.exit()
 
@@ -1392,7 +1400,7 @@ class HostMenu(GameState):
 			element.draw()
 
 	def return_to_menu(self):
-		return MainMenu(self.game)
+		self.transition_state(MainMenu(self.game))
 
 class ConnectMenu(GameState):
 	def __init__(self, game):
@@ -1448,7 +1456,7 @@ class ConnectMenu(GameState):
 					self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
 
 	def return_to_menu(self):
-		return MainMenu(self.game)
+		self.transition_state(MainMenu(self.game))
 
 	def update(self, dt, mouse_pos):
 		for element in self.ui_elements:
@@ -1486,10 +1494,11 @@ def lighten_color(color, amount):
 		return color
 
 class Field(GameState):
-	def __init__(self, game, player_number):
+	def __init__(self, game, player_number, game_type='SP'):
 		super().__init__(game)
 
 		self.player_number = player_number
+		self.game_type = game_type
 		self.board = Board(self, grid_count)
 		self.hands = {
 			0: Hand(self), # Hand for player 0
@@ -1551,7 +1560,7 @@ class Field(GameState):
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_press(mouse_pos),
-			Input(key=pg.K_SPACE): lambda mouse_pos: self._advance_turn(),
+			Input(key=pg.K_SPACE): lambda mouse_pos: self.space_pressed(),
 			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.player_turn].add_card("Mountain"),
 			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
 			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.player_turn].add_card("Morale"),
@@ -1582,6 +1591,12 @@ class Field(GameState):
 			hand_left = card_coords[0][0]
 		return pg.Rect((hand_left, self.hand_center[1]), (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
 	
+	def space_pressed(self):
+		if self.game_type == 'MP' and not self.is_current_player_active():
+			return
+		self._advance_turn()
+
+
 	def left_mouse_pressed(self, mouse_pos):
 		if self.hand_rect.collidepoint(mouse_pos): # mouse is hovering hand
 			hand_left = self.get_left_side_of_hand()
@@ -1627,8 +1642,11 @@ class Field(GameState):
 			self.card_grab_point = None # Probably not necessary
 
 		if self.turn_button.left_mouse_released(mouse_pos): # if button was pressed
-			if self.is_current_player_active():
+			if self.game_type == 'SP':
 				self._end_turn()
+			elif self.game_type == 'MP':
+				if self.is_current_player_active():
+					self._end_turn()
 	
 	def right_mouse_press(self, mouse_pos):
 		self.board.right_mouse_press(mouse_pos)
@@ -1644,34 +1662,28 @@ class Field(GameState):
 			self.player_turn = 0
 
 	def _end_turn(self):
-		if self.is_current_player_active():
-			send_string = 'turn ended;' + str(self.player_turn) + ';[END]'
-			self.game.queue_network_data(send_string.encode('utf-8'))
-
-		self.phase.end_turn()
-		self.swap_active_player()
-		self.cards_played = 0
+		end_of_turn = self._advance_turn()
+		while end_of_turn == False:
+			end_of_turn = self._advance_turn()
 
 	def _advance_turn(self):
-		# TODO: Hacky
-		do_advance = False
-		if self.game.connected == False or self.is_current_player_active():
-			do_advance = True
+		if self.phase.name == "End":
+			self.board.do_begin_phase()
+			self.board.do_attack_phase()
 
-		if do_advance:
-			if self.phase.name == "End":
-				self.board.do_begin_phase()
-				self.board.do_attack_phase()
-
-			self._advance_phase()
-
-			send_string = 'phase advanced;' + str(self.phase.name) + ';[END]'
+		if self.is_current_player_active():
+			send_string = 'phase advanced' + ';[END]'
 			self.game.queue_network_data(send_string.encode('utf-8'))
 
-	def _advance_phase(self):
-		end_of_turn = self.phase.advance_phase()
-		if end_of_turn:
-			self._end_turn()
+		self.phase.advance_phase()
+
+		if self.phase.turn_ended == True:
+			self.phase.end_turn()
+			self.swap_active_player()
+			self.cards_played = 0
+			return True
+		else:
+			return False
 
 	def process_network_data(self, data):
 		raw_data_string = data.decode('utf-8')
@@ -1683,10 +1695,9 @@ class Field(GameState):
 					self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
 				if args[0] == 'turn ended':
 					print('turn ended')
-					self.set_active_player(int(args[1]))
+					self._end_turn()
 				if args[0] == 'phase advanced':
-					print('phase advanced')
-					self.phase.name = args[1]
+					self._advance_turn()
 				if args[0] == 'health changed':
 					self.change_health(int(args[1]), int(args[2]))
 			except:
@@ -1698,7 +1709,7 @@ class Field(GameState):
 	def go_to_main_menu(self):
 		send_string = 'quit field' + ';[END]'
 		self.game.queue_network_data(send_string.encode('utf-8'))
-		return MainMenu(self.game)
+		self.transition_state(MainMenu(self.game))
 
 	def generate_hand_card_positions(self):
 		total_width = self.active_hand.card_count * self.hand_spacing[0]
@@ -2210,7 +2221,7 @@ input = Input()
 start_state = lambda game_: MainMenu(game_)
 try:
 	if sys.argv[1] == 'field':
-		start_state = lambda game_: Field(game_, 0)
+		start_state = lambda game_: Field(game_, 0, 'SP')
 	elif sys.argv[1] == 'connect':
 		start_state = lambda game_: ConnectMenu(game_)
 	elif sys.argv[1] == 'host':
