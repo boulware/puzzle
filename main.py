@@ -26,6 +26,7 @@ blue = (0,0,255)
 light_blue = (100,100,255)
 dark_blue = (0,0,70)
 very_dark_blue = (0,0,40)
+purple = (128,0,128)
 gold = (255,215,0)
 pink = (255,200,200)
 
@@ -170,9 +171,11 @@ class Grid:
 
 		return pos
 
-	def get_cell_at_mouse(self):
+	def get_cell_at_mouse(self, mouse_pos=None):
 		hit = False
-		mouse_x, mouse_y = pg.mouse.get_pos()
+		if mouse_pos == None:
+			mouse_pos = pg.mouse.get_pos()
+		mouse_x, mouse_y = mouse_pos
 
 		grid_x = (mouse_x - self.rect.x) // self.cell_size[0]
 		grid_y = (mouse_y - self.rect.y) // self.cell_size[1]
@@ -931,6 +934,8 @@ class Button(UI_Element):
 		if self.pressed == True and self.rect.collidepoint(mouse_pos):
 			self.button_was_pressed = True
 		self.pressed = False
+		if self.parent_container:
+			self.parent_container.unfocus_ui_element(self)
 
 	def clear_pressed(self):
 		self.button_was_pressed = False
@@ -1619,6 +1624,8 @@ class ConnectMenu(GameState):
 
 		self.sel = None
 
+	def _submit(self):
+		self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
 
 	def _attempt_to_connect(self, host, port):
 		self.game._attempt_to_connect(host, port)
@@ -1628,7 +1635,7 @@ class ConnectMenu(GameState):
 
 	def update(self, dt, mouse_pos):
 		if self.connect_button.button_was_pressed == True:
-			self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
+			self._submit()
 			self.connect_button.clear_pressed()
 
 def clamp(value, min_value, max_value):
@@ -1729,7 +1736,7 @@ class Field(GameState):
 			# Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
-			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_press(mouse_pos),
+			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_pressed(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: self.space_pressed(),
 			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.player_turn].add_card("Mountain"),
 			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
@@ -1813,8 +1820,16 @@ class Field(GameState):
 				if self.is_current_player_active():
 					self._end_turn()
 	
-	def right_mouse_press(self, mouse_pos):
-		self.board.right_mouse_press(mouse_pos)
+	def right_mouse_pressed(self, mouse_pos):
+		result = self.board.grid.get_cell_at_mouse(mouse_pos)
+		if result['hit'] == True:
+			cell = result['cell']
+			card_name = self.board.return_card_to_hand(cell)
+			if card_name != None:
+				self.board._refresh_passives()
+
+				send_string = 'card removed;' + card_name + ';' + str(result['cell'][0]) + ';' + str(result['cell'][1]) + ';[END]' 
+				self.game.queue_network_data(send_string.encode('utf-8'))
 
 	def set_active_player(self, player_number):
 		self.player_turn = player_number
@@ -1858,6 +1873,8 @@ class Field(GameState):
 			try:
 				if args[0] == 'card placed':
 					self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
+				elif args[0] == 'card removed':
+					self.board.return_card_to_hand((int(args[2]), int(args[3])))
 				elif args[0] == 'turn ended':
 					print('turn ended')
 					self._end_turn()
@@ -2332,7 +2349,9 @@ class ChatWindow(UI_Element):
 		self.message_width = message_width
 		self.log_height = log_height
 		self.text_color = text_color
-		self.user_colors = {"Tyler": light_red, "Shawn": light_blue, "Offline": grey}
+		self.user_color_pool = [white, grey]
+		self.colors_used = 0
+		self.user_colors = {"Offline": grey}
 		self.messages = []
 
 		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.log_height),
@@ -2358,8 +2377,10 @@ class ChatWindow(UI_Element):
 	
 	def add_message(self, user, text):
 		message = (user, text)
-		print(message)
 		self.messages.append(message)
+		if user not in self.user_colors:
+			self.user_colors[user] = self.user_color_pool[self.colors_used % len(self.user_color_pool)]
+			self.colors_used += 1
 
 	def any_key_pressed(self, key, mode, unicode_key):
 		self.ui_container.any_key_pressed(key, mode, unicode_key)
@@ -2438,25 +2459,17 @@ class Board:
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
 			self.cards[cell].owner = None
-			self.field.active_hand.add_card(name=self.cards[cell].name)
+			card_name = self.cards[cell].name
+			self.field.active_hand.add_card(name=card_name)
 			self.cards[cell] = None
 			self._refresh_passives()
 
-			return True # Card returned
-		else:
-			return False # No card returned
+			return card_name
 
 	def remove_card_from_board(self, cell):
 		if self.cards[cell] != None:
 			self.cards[cell].owner = None
 			self.cards[cell] = None
-			self._refresh_passives()
-
-	def right_mouse_press(self, pos):
-		result = self.grid.get_cell_at_mouse()
-		if result['hit'] == True:
-			cell = result['cell']
-			self.return_card_to_hand(cell)
 			self._refresh_passives()
 
 	def get_frontmost_occupied_cell(self, player, lane):
