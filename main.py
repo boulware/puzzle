@@ -27,6 +27,7 @@ light_blue = (100,100,255)
 dark_blue = (0,0,70)
 very_dark_blue = (0,0,40)
 gold = (255,215,0)
+pink = (255,200,200)
 
 # Game parameters
 grid_count = (5,6)
@@ -732,12 +733,13 @@ class UI_Container:
 	def unfocus_ui_element(self, target=None):
 		if target == None:
 			self.focused_element = None
-			return True
-		elif target == self.focused_element:
-			self.focused_element = None
-			return True
 		else:
-			return False
+			if target == self.focused_element:
+				self.focused_element = None
+
+		for e in self.ui_elements:
+			if isinstance(e, UI_Container):
+				e.unfocus_ui_element(target)
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		if self.focused_element:
@@ -758,6 +760,8 @@ class UI_Container:
 	def draw(self):
 		for e in self.ui_elements:
 			e.draw()
+			if e == self.focused_element:
+				pass#pg.draw.circle(screen, pink, e.pos, 10)
 
 # Represents a group of individual UI_Containers that are displayed
 # on the screen at once and interact smoothly between each other
@@ -781,8 +785,9 @@ class UI_Group:
 
 	def unfocus_ui_element(self, target=None):
 		for container in self.ui_containers:
-			if container.unfocus_ui_element(target):
-				self.focused_container = None
+			container.unfocus_ui_element(target)
+		self.focused_container = None
+
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		for container in self.ui_containers:
@@ -855,6 +860,7 @@ class Button(UI_Element):
 
 		self._hovered = False
 		self._pressed = False
+		self.button_was_pressed = False
 
 		self._generate_surfaces()
 
@@ -906,12 +912,16 @@ class Button(UI_Element):
 	def left_mouse_pressed(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
 			self.pressed = True
+			if self.parent_container:
+				self.parent_container.focus_ui_element(self)
 
 	def left_mouse_released(self, mouse_pos):
-		button_pressed = self.pressed
+		if self.pressed == True and self.rect.collidepoint(mouse_pos):
+			self.button_was_pressed = True
 		self.pressed = False
 
-		return button_pressed
+	def clear_pressed(self):
+		self.button_was_pressed = False
 
 	def update(self, dt, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
@@ -1057,7 +1067,19 @@ class TextEntry(UI_Element):
 		self._cursor_pos = cursor_pos
 		self.cursor_visible = True
 		self.cursor_timer = 0
-	
+		
+	def clear_text(self):
+		self.text = ''
+		self.selected_text_indices = None
+		self.select_mode = False
+		self.select_start_index = None
+		self.cursor_pos = 0
+		self.cursor_timer = 0
+		self.cursor_visible = True
+
+		self._calculate_char_positions()
+		self._generate_surfaces()
+
 	# unselect text and place cursor at cursor_pos
 	def _unselect(self, cursor_pos):
 		self.cursor_pos = cursor_pos
@@ -1171,9 +1193,6 @@ class TextEntry(UI_Element):
 		return 0
 
 	def left_mouse_pressed(self, mouse_pos):
-		# print('mouse_pos=', mouse_pos)
-		# print('self.rect=', self.rect)
-		# print('***')
 		if self.rect.collidepoint(mouse_pos):
 			if self.parent_container:
 				self.parent_container.focus_ui_element(self)
@@ -1384,10 +1403,8 @@ class GameState:
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		if input in self.input_map:
 			self.input_map[input](mouse_pos)
-		else:
+		elif Input(key='any') in self.input_map:
 			self.input_map[Input(key='any')](input.key, mod, unicode_key)
-		if self.target_state:
-			return self.target_state
 		# state = None
 		# if input in self.input_map:
 		# 	state = self.input_map[input](mouse_pos)
@@ -1402,10 +1419,10 @@ class GameState:
 	def left_mouse_pressed(self, mouse_pos):
 		pass#self.ui_container.left_mouse_pressed(mouse_pos)
 	def update(self, dt, mouse_pos):
-		raise NotImplementedError()
+		pass
 	# These are 'virtual' methods -- should be overridden by child class
 	def draw(self):
-		raise NotImplementedError()
+		pass
 	def queue_state_transition(self, new_state):
 		self.target_state = new_state
 	def fetch_network_data(self):
@@ -1419,7 +1436,6 @@ class MainMenu(GameState):
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(key=pg.K_ESCAPE): lambda _: sys.exit()
 		}
 
@@ -1438,7 +1454,19 @@ class MainMenu(GameState):
 			selected_text = self.list_menu.confirmed_item_text
 			if selected_text == 'Start SP Game':
 				self.queue_state_transition(Field(self.game, 0))
-				self.list_menu.clear_confirmed()
+			elif selected_text == 'Start MP Game':
+				if self.game.connection_role == 'host':
+					self.queue_state_transition(Field(self.game, 0))
+				elif self.game.connection_role == 'client':
+					self.queue_state_transition(Field(self.game, 1))
+			elif selected_text == 'Host':
+				self.queue_state_transition(HostMenu(self.game))
+			elif selected_text == 'Connect':
+				self.queue_state_transition(ConnectMenu(self.game))
+			elif selected_text == 'Exit':
+				sys.exit()
+
+		self.list_menu.clear_confirmed()
 
 	def draw(self):
 		pass#UI_Container.draw(self)
@@ -1468,10 +1496,7 @@ class HostMenu(GameState):
 		GameState.__init__(self, game)
 
 		self.input_map = {
-			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.return_to_menu(),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
-			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(key=pg.K_RETURN): lambda _: self._submit()
 		}		
 
@@ -1493,17 +1518,6 @@ class HostMenu(GameState):
 		self.ui_container.add_ui_element(self.host_button)
 		self.ui_container.add_ui_element(self.disconnect_button)
 
-	def left_mouse_released(self, mouse_pos):
-		for element in self.ui_container:
-			result = element.left_mouse_released(mouse_pos)
-			if element == self.host_button:
-				if result:
-					self._start_host()
-			elif element == self.disconnect_button:
-				if result:
-					self._close_connection()
-
-
 	def _start_host(self):
 		try:
 			port = int(self.port_textentry.text)
@@ -1516,23 +1530,25 @@ class HostMenu(GameState):
 		self.game.close_connection()
 
 	def update(self, dt, mouse_pos):
-		pass
+		if self.host_button.button_was_pressed == True:
+			self._start_host()
+			self.host_button.clear_pressed()
+		elif self.disconnect_button.button_was_pressed == True:
+			self._close_connection()
+			self.disconnect_button.clear_pressed()
 
 	def draw(self):
 		pass
 
 	def return_to_menu(self):
-		self.transition_state(MainMenu(self.game))
+		self.queue_state_transition(MainMenu(self.game))
 
 class ConnectMenu(GameState):
 	def __init__(self, game):
 		GameState.__init__(self, game)
 
 		self.input_map = {
-			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.return_to_menu(),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
-			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(key=pg.K_RETURN): lambda _: self._submit()
 		}
 
@@ -1562,19 +1578,13 @@ class ConnectMenu(GameState):
 	def _attempt_to_connect(self, host, port):
 		self.game._attempt_to_connect(host, port)
 
-	def left_mouse_released(self, mouse_pos):
-		for ui_element in self.ui_container:
-			result = element.left_mouse_released(mouse_pos)
-			if element == self.connect_button:
-				if result == True: # If button was pressed
-					self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
-
 	def return_to_menu(self):
-		self.transition_state(MainMenu(self.game))
+		self.queue_state_transition(MainMenu(self.game))
 
 	def update(self, dt, mouse_pos):
-		for element in self.ui_elements:
-			element.update(dt, mouse_pos)
+		if self.connect_button.button_was_pressed == True:
+			self._attempt_to_connect(self.ip_textentry.text, int(self.port_textentry.text))
+			self.connect_button.clear_pressed()
 
 def clamp(value, min_value, max_value):
 	clamped_value = value
@@ -1671,7 +1681,7 @@ class Field(GameState):
 
 
 		self.input_map = {
-			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
+			# Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_press(mouse_pos),
@@ -1720,8 +1730,6 @@ class Field(GameState):
 				if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
 					self.drag_card = self.active_hand.pop_card(clicked_card_index)
 					self.card_grab_point = (relative_x,relative_y)
-
-		self.turn_button.left_mouse_pressed(mouse_pos)
 
 	def is_current_player_active(self):
 		if self.player_turn == self.player_number:
@@ -1818,7 +1826,7 @@ class Field(GameState):
 	def go_to_main_menu(self):
 		send_string = 'quit field' + ';[END]'
 		self.game.queue_network_data(send_string.encode('utf-8'))
-		self.transition_state(MainMenu(self.game))
+		self.queue_state_transition(MainMenu(self.game))
 
 	def generate_hand_card_positions(self):
 		total_width = self.active_hand.card_count * self.hand_spacing[0]
@@ -1994,6 +2002,7 @@ class Game:
 	def refresh_ui_group(self):
 		self.ui_group = UI_Group(ui_containers=[self.ui_container, self.state.ui_container])
 
+
 	def any_key_pressed(self, key, mod, unicode_key):
 		self.ui_group.any_key_pressed(key, mod, unicode_key)
 
@@ -2161,16 +2170,16 @@ class Game:
 		else:
 			self.input_map[Input(key='any')](input.key, mod, unicode_key)
 
-		new_state = self.state.handle_input(input, mouse_pos, mod, unicode_key)
-		if new_state:
-			self.state = new_state
+		if self.ui_group.focused_container == None or self.ui_group.focused_container.focused_element == None:
+			self.state.handle_input(input, mouse_pos, mod, unicode_key)
 
 	def update(self, dt, mouse_pos):
+		if self.state.target_state:
+			self.state = self.state.target_state
+
 		self.select()
 		self.state.update(dt, mouse_pos)
 		self.ui_group.update(dt, mouse_pos)
-		# if self.ui_group.focused_container:
-		# 	print(self.ui_group.focused_container.focused_element)
 
 	def draw(self):
 		self.state.draw()
@@ -2231,11 +2240,7 @@ class ChatWindow(UI_Element):
 		self.log_height = log_height
 		self.text_color = text_color
 		self.user_colors = {"Tyler": light_red, "Simon": light_blue}
-		self.messages = [	("Tyler", "What's up?"),
-							("Simon", "WATS UP"),
-							("Tyler", "i was just asfasjdfl jfkds jf fskdlfjlk sdklfj sfs d jsdfk jsdlf jdkfj lsd  ksdf?"),
-							("Tyler", "idk"),
-							("Simon", "ye i gues so :3")]
+		self.messages = []
 
 		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.log_height),
 									font=message_font,
@@ -2259,11 +2264,18 @@ class ChatWindow(UI_Element):
 	
 	def any_key_pressed(self, key, mode, unicode_key):
 		self.ui_container.any_key_pressed(key, mode, unicode_key)
+		if key == pg.K_RETURN:
+			self.messages.append(("Tyler", self.text_entry.text))
+			self.text_entry.clear_text()
 
 	def left_mouse_pressed(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
 			if self.parent_container:
 				self.parent_container.focus_ui_element(self)
+		else:
+			if self.parent_container:
+				self.parent_container.unfocus_ui_element()
+
 		self.ui_container.left_mouse_pressed(mouse_pos)
 
 	def left_mouse_released(self, mouse_pos):
@@ -2494,7 +2506,7 @@ except:
 # pg setup
 pg.init()
 pg.key.set_repeat(300, 30)
-screen_size = (1200,800)
+screen_size = (900,800)
 screen = pg.display.set_mode(screen_size)
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
 card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
