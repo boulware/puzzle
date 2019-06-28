@@ -690,33 +690,123 @@ class InputMap:
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
-# class UI_Container:
-# 	def __init__()
-
 class UI_Element:
+	def __init__(self, parent_container=None):
+		self.parent_container = parent_container
+	def any_key_pressed(self, key, mod, unicode_key):
+		pass
+	def left_mouse_pressed(self, mouse_pos):
+		pass
+	def left_mouse_released(self, mouse_pos):
+		pass
+	def update(self, dt, mouse_pos):
+		pass
+
+class UI_Container:
 	def __init__(self):
 		self.ui_elements = []
+		self.ui_group_parent = None
+		self.focused_element = None
+
+	def __iter__(self):
+		return iter(self.ui_elements)
+
+	def add_ui_element(self, element):
+		self.ui_elements.append(element)
+		element.parent_container = self
+		if self.focused_element == None:
+			self.focused_element = element
+
+	def focus_ui_element(self, target):
+		for e in self.ui_elements:
+			if e == target:
+				self.focused_element = target
+				if self.ui_group_parent:
+					self.ui_group_parent.focus_ui_element(target)
+				return True
+		return False
+		# If the element isn't in this container, ignore the focus request
+
+	# Returns True if there is no focused element upon return,
+	# Returns False if there is still a focused element upon return
+	def unfocus_ui_element(self, target=None):
+		if target == None:
+			self.focused_element = None
+			return True
+		elif target == self.focused_element:
+			self.focused_element = None
+			return True
+		else:
+			return False
+
 	def any_key_pressed(self, key, mod, unicode_key):
-		#self.key_pressed(key, mod, unicode_key)
-		for element in self.ui_elements:
-			element.key_pressed(key, mod, unicode_key)
+		if self.focused_element:
+			self.focused_element.any_key_pressed(key, mod, unicode_key)
+
 	def left_mouse_pressed(self, mouse_pos):
-		#self.left_mouse_pressed(mouse_pos)
-		for element in self.ui_elements:
-			element.left_mouse_pressed(mouse_pos)
+		for e in self.ui_elements:
+			e.left_mouse_pressed(mouse_pos)
+
 	def left_mouse_released(self, mouse_pos):
-		for element in self.ui_elements:
-			element.left_mouse_released(mouse_pos)
+		if self.focused_element:
+			self.focused_element.left_mouse_released(mouse_pos)
+
 	def update(self, dt, mouse_pos):
-		for element in self.ui_elements:
-			element.update(dt, mouse_pos)
+		for e in self.ui_elements:
+			e.update(dt, mouse_pos)
+
 	def draw(self):
-		for element in self.ui_elements:
-			element.draw()
+		for e in self.ui_elements:
+			e.draw()
+
+# Represents a group of individual UI_Containers that are displayed
+# on the screen at once and interact smoothly between each other
+class UI_Group:
+	def __init__(self, ui_containers):
+		self.ui_containers = ui_containers
+		self.focused_container = None
+		for container in self.ui_containers:
+			container.unfocus_ui_element()
+			container.ui_group_parent = self
+
+	def focus_ui_element(self, target):
+		for container in self.ui_containers:
+			for e in container:
+				if e == target:
+					container.focused_element = target
+					self.focused_container = container
+		for container in self.ui_containers:
+			if container != self.focused_container:
+				container.unfocus_ui_element()
+
+	def unfocus_ui_element(self, target=None):
+		for container in self.ui_containers:
+			if container.unfocus_ui_element(target):
+				self.focused_container = None
+
+	def any_key_pressed(self, key, mod, unicode_key):
+		for container in self.ui_containers:
+			container.any_key_pressed(key, mod, unicode_key)
+
+	def left_mouse_pressed(self, mouse_pos):
+		for container in self.ui_containers:
+			container.left_mouse_pressed(mouse_pos)
+
+	def left_mouse_released(self, mouse_pos):
+		for container in self.ui_containers:
+			container.left_mouse_released(mouse_pos)
+
+	def update(self, dt, mouse_pos):
+		for container in self.ui_containers:
+			container.update(dt, mouse_pos)
+
+	def draw(self):
+		for container in self.ui_containers:
+			container.draw()
 
 class Label(UI_Element):
-	def __init__(self, pos, font, align=('left','top'), text_color=white, text=''):
-		super().__init__()
+	def __init__(self, pos, font, align=('left','top'), text_color=white, text='', parent_container=None):
+		UI_Element.__init__(self, parent_container)
 		self.pos = pos
 		self.font = font
 		self.align = align
@@ -749,8 +839,9 @@ class Button(UI_Element):
 					align=('left','top'),
 					bg_colors={'default': black, 'hovered': dark_grey, 'pressed': green},
 					text_colors={'default': white, 'hovered': white, 'pressed': white},
-					padding=(10,0)):
-		super().__init__()
+					padding=(10,0),
+					parent_container=None):
+		UI_Element.__init__(self, parent_container)
 		self.pos = pos
 		self.font = font
 		self.text = text
@@ -854,8 +945,9 @@ class TextEntry(UI_Element):
 					label = '',
 					text_cursor_scale=0.75, cursor_blink_time=750,
 					padding=(5,0),
-					default_text=''):
-		super().__init__()
+					default_text='',
+					parent_container=None):
+		UI_Element.__init__(self, parent_container)
 		self.pos = pos
 		self.width = width
 		self.type = type
@@ -875,7 +967,6 @@ class TextEntry(UI_Element):
 			else:
 				self.width = 200
 
-		self.height = self._calculate_height()
 		self.size = (self.width, self.height)
 		self.rect = pg.Rect(pos,self.size)
 
@@ -894,6 +985,10 @@ class TextEntry(UI_Element):
 
 		self._generate_surfaces()
 
+	@property
+	def height(self):
+		return self._calculate_height()
+	
 	def _calculate_char_positions(self, pos=None):
 		char_positions = []
 		if pos == None: # Recalculate positions for the whole string
@@ -976,7 +1071,7 @@ class TextEntry(UI_Element):
 		self.text = left + right
 		self._unselect(cursor_pos = self.selected_text_indices[0])
 
-	def key_pressed(self, key, mod, unicode_key):
+	def any_key_pressed(self, key, mod, unicode_key):
 		if self.selected == False:
 			return
 
@@ -1066,29 +1161,45 @@ class TextEntry(UI_Element):
 			if i == 0: # valid between -inf up to the second position_bound
 				if relative_x <= position_bound[1]:
 					return i
-			elif i == len(self.position_bounds)-1: # valid between first position bound and +inf
+			if i == len(self.position_bounds)-1: # valid between first position bound and +inf
 				if relative_x >= position_bound[0]:
 					return i
 			elif relative_x >= position_bound[0] and relative_x <= position_bound[1]:
 				return i
 
+		print('mouse_pos_to_cursor_index() failed')
+		return 0
+
 	def left_mouse_pressed(self, mouse_pos):
+		# print('mouse_pos=', mouse_pos)
+		# print('self.rect=', self.rect)
+		# print('***')
 		if self.rect.collidepoint(mouse_pos):
+			if self.parent_container:
+				self.parent_container.focus_ui_element(self)
 			self.selected = True
 
-			self.cursor_pos = self.mouse_pos_to_cursor_index(mouse_pos)
+			new_cursor_pos = self.mouse_pos_to_cursor_index(mouse_pos)
+			if new_cursor_pos:
+				self.cursor_pos = new_cursor_pos
 
 			self.select_start_index = self.cursor_pos
 			self.select_mode = True
 			self.cursor_visible = True
 			self.cursor_timer = 0
 		else:
+			if self.parent_container:
+				self.parent_container.unfocus_ui_element(self)
 			self.selected = False
 
 
 	def left_mouse_released(self, mouse_pos):
 		self.select_mode = False
 		self.select_start_index = None
+
+
+		# if self.selected_text_indices[0] == self.selected_text_indices[1]:
+		# 	self.selected_text_indices = None
 
 	def check_mouse_inside(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
@@ -1130,7 +1241,7 @@ class TextEntry(UI_Element):
 			shifted_right = right + self.rect.left + self.padding[0]
 
 			pg.draw.rect(screen, grey, ((shifted_left,self.rect.top),(shifted_right-shifted_left,self.rect.height)))
-			screen.blit(self.text_selected_surface, (shifted_left, self.rect.top), (left, 0, right, self.text_selected_surface.get_height()))
+			screen.blit(self.text_selected_surface, (shifted_left, self.rect.top), (left, 0, right-left, self.text_selected_surface.get_height()))
 
 	def draw(self):
 		draw_surface_aligned(	target=screen,
@@ -1149,8 +1260,8 @@ class TextEntry(UI_Element):
 			self._draw_cursor()
 
 class ListMenu(UI_Element):
-	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0):
-		super().__init__()
+	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0, parent_container=None):
+		UI_Element.__init__(self, parent_container)
 		self.items = items
 		self.pos = pos
 		self.align = align
@@ -1159,52 +1270,34 @@ class ListMenu(UI_Element):
 		self.selected_font = selected_font
 		self.item_spacing = item_spacing
 		self.selected = selected
+		self.confirmed_index = None
 
-	def _generate_surface(self):
-		# rects which delineate each menu item (for checking mouse hover, etc.)
-		self.item_rects = []
+	def _generate_surfaces(self):
+		self.item_surfaces = []
+		self.selected_item_surfaces = []
 
-		total_height = 0
+		for item in self.items:
+			self.item_surfaces.append(self.font.render(item, True, light_grey))
+			self.selected_item_surfaces.append(self.selected_font.render(item, True, gold))
+
+	@property
+	def rect(self):
+		current_height = 0
 		max_width = 0
-		for i, item in enumerate(self.items):
-			if i == self.selected:
-				text_size = self.selected_font.size(item)
-			else:
-				text_size = self.font.size(item)
+		for item_index, _ in enumerate(self.items):
+			item_surface = self.get_item_surface(item_index)
+			current_height += item_surface.get_height()
+			max_width = max(max_width, item_surface.get_width())
 
-			total_height += text_size[1]
-			max_width = max(max_width, text_size[0])
+		return pg.Rect(self.pos, (max_width, current_height))
 
-		total_height += line_spacing*(len(self.items)-1)
-
-		self.surface = pg.Surface((max_width, total_height))
-		# TODO: Only functions with align=center (I think)
-		self.rect = pg.Rect((self.pos[0]-max_width//2, self.pos[1]-total_height//2),(max_width,total_height))
-
-		current_y = 0 # The y value where the next menu item should be drawn
-		for i, item in enumerate(self.items):
-			if i == self.selected:
-				text_surface = self.selected_font.render(item, True, gold)
-			else:
-				text_surface = self.font.render(item, True, light_grey)
-			item_pos = (0,0)
-			if self.text_align == 'center':
-				item_pos = (self.surface.get_width()//2,current_y)
-			elif self.text_align == 'left':
-				item_pos = (0,current_y)
-			elif self.text_align == 'right':
-				item_pos = (self.surface.get_width()-1, current_y)
-
-			align_offset = draw_surface_aligned(	target=self.surface, 
-													source=text_surface,
-													pos=item_pos,
-													align=(self.text_align,'top'))
-
-			# Not align-friendly (only works with center)
-			item_rect = pg.Rect((self.pos[0]-self.surface.get_width()//2, self.pos[1]-self.surface.get_height()//2+current_y-self.item_spacing//2), (self.surface.get_width(), text_surface.get_height()+self.item_spacing))
-			self.item_rects.append(item_rect)
-
-			current_y += text_surface.get_height() + self.item_spacing
+	@property
+	def confirmed_item_text(self):
+		if self.confirmed_index != None:
+			return self.items[self.confirmed_index]
+		else:
+			return ''
+	
 
 	@property
 	def selected(self):
@@ -1213,14 +1306,17 @@ class ListMenu(UI_Element):
 	@selected.setter
 	def selected(self, selected):
 		self._selected = selected
-		self._generate_surface()
+		self._generate_surfaces()
 
-	def move_cursor_up(self):
+	def clear_confirmed(self):
+		self.confirmed_index = None
+
+	def _move_cursor_up(self):
 		self.selected -= 1
 		if self.selected < 0:
 			self.selected = len(self.items)-1
 
-	def move_cursor_down(self):
+	def _move_cursor_down(self):
 		self.selected += 1
 		if self.selected >= len(self.items):
 			self.selected = 0
@@ -1237,19 +1333,45 @@ class ListMenu(UI_Element):
 		else:
 			return False
 
+	def get_item_surface(self, item_index):
+		if item_index == self.selected:
+			return self.selected_item_surfaces[item_index]
+		else:
+			return self.item_surfaces[item_index]
+
+	def any_key_pressed(self, key, mod, unicode_key):
+		if key==pg.K_UP or key==pg.K_w or key==pg.K_LEFT or key==pg.K_a:
+			self._move_cursor_up()
+		elif key==pg.K_DOWN or key==pg.K_s or key==pg.K_RIGHT or key==pg.K_d:
+			self._move_cursor_down()
+		elif key==pg.K_RETURN or key==pg.K_SPACE:
+			self.confirmed_index = self.selected
 
 	def update(self, dt, mouse_pos):
-		# TODO: Can probably be optimized by doing one check for the WHOLE self.surface first and then continuing if True
-		for i, item_rect in enumerate(self.item_rects):
-			if item_rect.collidepoint(mouse_pos):
-				self.selected = i
-				return
+		if self.rect.collidepoint(mouse_pos):
+			self.parent_container.focus_ui_element(self)
+
+			current_y = 0
+			mouse_relative_pos = (mouse_pos[0] - self.pos[0], mouse_pos[1] - self.pos[1])
+			for item_index, _ in enumerate(self.items):
+				item_surface = self.get_item_surface(item_index)
+				# x bounds are already satisfied because of the self.rect.collidepoint() check above
+				if mouse_relative_pos[1] >= current_y and mouse_relative_pos[1] < current_y+item_surface.get_height(): # y bounds
+					self.selected = item_index
+				current_y += item_surface.get_height()
+
 
 	def draw(self):
-		draw_surface_aligned(	target=screen,
-								source=self.surface,
-								pos=self.pos,
-								align=self.align)
+		current_y = 0
+		for item_index, _ in enumerate(self.items):
+			item_surface = self.get_item_surface(item_index)
+			screen.blit(item_surface, (self.pos[0], self.pos[0]+current_y))
+			current_y += item_surface.get_height()
+
+		# draw_surface_aligned(	target=screen,
+		# 						source=self.surface,
+		# 						pos=self.pos,
+		# 						align=self.align)
 		# for item_rect in self.item_rects:
 		# 	pg.draw.rect(screen, green, item_rect, 1)
 
@@ -1257,7 +1379,7 @@ class ListMenu(UI_Element):
 class GameState:
 	def __init__(self, game):
 		self.game = game
-		self.ui_elements = []
+		self.ui_container = UI_Container()
 		self.target_state = None
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		if input in self.input_map:
@@ -1275,13 +1397,16 @@ class GameState:
 		# else:				# but if not, let's check the 'any key' event:
 		# 	if input.key:
 		# 		state = self.input_map[Input(key='any')](input.key, mod, unicode_key)
+	def any_key_pressed(self, key, mod, unicode_key):
+		pass#self.ui_container.any_key_pressed(key, mod, unicode_key)
+	def left_mouse_pressed(self, mouse_pos):
+		pass#self.ui_container.left_mouse_pressed(mouse_pos)
 	def update(self, dt, mouse_pos):
 		raise NotImplementedError()
 	# These are 'virtual' methods -- should be overridden by child class
 	def draw(self):
-		for element in self.ui_elements:
-			element.draw()
-	def transition_state(self, new_state):
+		raise NotImplementedError()
+	def queue_state_transition(self, new_state):
 		self.target_state = new_state
 	def fetch_network_data(self):
 		pass
@@ -1290,71 +1415,60 @@ class GameState:
 
 class MainMenu(GameState):
 	def __init__(self, game):
-		super().__init__(game)
+		GameState.__init__(self, game)
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
-			Input(key=pg.K_SPACE): lambda _: self.keyboard_select_menu_item(),
-			Input(key=pg.K_RETURN): lambda _: self.keyboard_select_menu_item(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
-			Input(key=pg.K_ESCAPE): lambda _: sys.exit(),
-			Input(key=pg.K_UP): lambda _: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_w): lambda _: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_LEFT): lambda _: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_a): lambda _: self.list_menu.move_cursor_up(),
-			Input(key=pg.K_DOWN): lambda _: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_s): lambda _: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_RIGHT): lambda _: self.list_menu.move_cursor_down(),
-			Input(key=pg.K_d): lambda _: self.list_menu.move_cursor_down()
+			Input(key=pg.K_ESCAPE): lambda _: sys.exit()
 		}
 
 
 		self.list_menu = ListMenu(	items=('Start SP Game', 'Start MP Game', 'Host', 'Connect', 'Exit'),
-									pos=(screen_size[0]//2, screen_size[1]//2),
+									pos=(300,300),
 									align=('center','center'),
 									text_align=('center'),
 									font=main_menu_font,
 									selected_font=main_menu_selected_font)
 
+		self.ui_container.add_ui_element(self.list_menu)
+
 	def update(self, dt, mouse_pos):
-		self.list_menu.update(dt, mouse_pos)
+		if self.list_menu.confirmed_index != None:
+			selected_text = self.list_menu.confirmed_item_text
+			if selected_text == 'Start SP Game':
+				self.queue_state_transition(Field(self.game, 0))
+				self.list_menu.clear_confirmed()
 
 	def draw(self):
-		self.list_menu.draw()
+		pass#UI_Container.draw(self)
 
-	def any_key_pressed(self, key, mod, unicode_key):
-		pass
-
-	def activate_menu(self):
-		selected = self.list_menu.get_selected_item()
-		if selected == 'Start SP Game':
-			self.transition_state(Field(self.game, 0, 'SP'))
-		elif selected == 'Start MP Game':
-			if self.game.connected == True:
-				if self.game.connection_role == 'host':
-					self.transition_state(Field(self.game, 0, 'MP'))
-				elif self.game.connection_role == 'client':
-					self.transition_state(Field(self.game, 1, 'MP'))
-		elif selected == 'Host':
-			self.transition_state(HostMenu(self.game))
-		elif selected == 'Connect':
-			self.transition_state(ConnectMenu(self.game))
-		elif selected == 'Exit':
-			sys.exit()
-
-	def left_mouse_pressed(self, mouse_pos):
-		if self.list_menu.check_mouse_inside(mouse_pos):
-			return self.activate_menu()
+	# def activate_menu(self):
+	# 	selected = self.list_menu.get_selected_item()
+	# 	if selected == 'Start SP Game':
+	# 		self.queue_state_transition(Field(self.game, 0, 'SP'))
+	# 	elif selected == 'Start MP Game':
+	# 		if self.game.connected == True:
+	# 			if self.game.connection_role == 'host':
+	# 				self.queue_state_transition(Field(self.game, 0, 'MP'))
+	# 			elif self.game.connection_role == 'client':
+	# 				self.queue_state_transition(Field(self.game, 1, 'MP'))
+	# 	elif selected == 'Host':
+	# 		self.transition_state(HostMenu(self.game))
+	# 	elif selected == 'Connect':
+	# 		self.transition_state(ConnectMenu(self.game))
+	# 	elif selected == 'Exit':
+	# 		sys.exit()
 
 	def keyboard_select_menu_item(self):
 		return self.activate_menu()
 
 class HostMenu(GameState):
 	def __init__(self, game):
-		super().__init__(game)
+		GameState.__init__(self, game)
 
 		self.input_map = {
-			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
+			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
 			Input(key=pg.K_ESCAPE): lambda _: self.return_to_menu(),
 			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
@@ -1372,23 +1486,15 @@ class HostMenu(GameState):
 									text='Host')
 
 		self.disconnect_button = Button(pos=(screen_size[0]//2-100,screen_size[1]//2+250),
-									font=main_menu_font_med,
-									text='Disconnect')
+										font=main_menu_font_med,
+										text='Disconnect')
 
-		self.ui_elements.append(self.port_textentry)
-		self.ui_elements.append(self.host_button)
-		self.ui_elements.append(self.disconnect_button)
-
-	def key_pressed(self, key, mod, unicode_key):
-		for element in self.ui_elements:
-			element.key_pressed(key, mod, unicode_key)
-
-	def left_mouse_pressed(self, mouse_pos):
-		for element in self.ui_elements:
-			element.left_mouse_pressed(mouse_pos)
+		self.ui_container.add_ui_element(self.port_textentry)
+		self.ui_container.add_ui_element(self.host_button)
+		self.ui_container.add_ui_element(self.disconnect_button)
 
 	def left_mouse_released(self, mouse_pos):
-		for element in self.ui_elements:
+		for element in self.ui_container:
 			result = element.left_mouse_released(mouse_pos)
 			if element == self.host_button:
 				if result:
@@ -1396,6 +1502,7 @@ class HostMenu(GameState):
 			elif element == self.disconnect_button:
 				if result:
 					self._close_connection()
+
 
 	def _start_host(self):
 		try:
@@ -1411,17 +1518,15 @@ class HostMenu(GameState):
 	def update(self, dt, mouse_pos):
 		pass
 
-
 	def draw(self):
-		for element in self.ui_elements:
-			element.draw()
+		pass
 
 	def return_to_menu(self):
 		self.transition_state(MainMenu(self.game))
 
 class ConnectMenu(GameState):
 	def __init__(self, game):
-		super().__init__(game)
+		GameState.__init__(self, game)
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.key_pressed(key, mod, unicode_key),
@@ -1447,9 +1552,9 @@ class ConnectMenu(GameState):
 										font=main_menu_font_med,
 										text='Connect')
 
-		self.ui_elements.append(self.ip_textentry)
-		self.ui_elements.append(self.port_textentry)
-		self.ui_elements.append(self.connect_button)
+		self.ui_container.add_ui_element(self.ip_textentry)
+		self.ui_container.add_ui_element(self.port_textentry)
+		self.ui_container.add_ui_element(self.connect_button)
 
 		self.sel = None
 
@@ -1457,16 +1562,8 @@ class ConnectMenu(GameState):
 	def _attempt_to_connect(self, host, port):
 		self.game._attempt_to_connect(host, port)
 
-	def key_pressed(self, key, mod, unicode_key):
-		for element in self.ui_elements:
-			element.key_pressed(key, mod, unicode_key)
-
-	def left_mouse_pressed(self, mouse_pos):
-		for element in self.ui_elements:
-			element.left_mouse_pressed(mouse_pos)
-
 	def left_mouse_released(self, mouse_pos):
-		for element in self.ui_elements:
+		for ui_element in self.ui_container:
 			result = element.left_mouse_released(mouse_pos)
 			if element == self.connect_button:
 				if result == True: # If button was pressed
@@ -1512,7 +1609,7 @@ def lighten_color(color, amount):
 
 class Field(GameState):
 	def __init__(self, game, player_number, game_type='SP'):
-		super().__init__(game)
+		GameState.__init__(self, game)
 
 		self.player_number = player_number
 		self.game_type = game_type
@@ -1546,7 +1643,8 @@ class Field(GameState):
 		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
 									align=('right','up'),
 									font=ui_font,
-									text="End Turn")
+									text="End Turn",
+									parent_container=self)
 
 		if player_number == 0:
 			self.player_health_labels = [
@@ -1567,8 +1665,9 @@ class Field(GameState):
 					text='Player 1: %s'%self.player_healths[1])
 			]
 
-		self.ui_elements.append(self.turn_button)
-		self.ui_elements += self.player_health_labels
+		self.ui_container.add_ui_element(self.turn_button)
+		for label in self.player_health_labels:
+			self.ui_container.add_ui_element(label)
 
 
 		self.input_map = {
@@ -1716,9 +1815,6 @@ class Field(GameState):
 			except:
 				pass
 
-	def any_key_pressed(self, key, mod, unicode_key):
-		pass
-
 	def go_to_main_menu(self):
 		send_string = 'quit field' + ';[END]'
 		self.game.queue_network_data(send_string.encode('utf-8'))
@@ -1749,7 +1845,7 @@ class Field(GameState):
 
 	def update(self, dt, mouse_pos):
 		self._generate_hovered_card_index(mouse_pos)
-		self.turn_button.update(dt, mouse_pos)
+		# self.turn_button.update(dt, mouse_pos)
 
 	def draw(self):
 		if self.player_number == 0:
@@ -1765,7 +1861,6 @@ class Field(GameState):
 			active_player_color = blue
 
 		# Draw board
-		super().draw()
 		self.board.draw(player_perspective=self.player_number)
 
 		# Calculate colors for card areas based on which player is active
@@ -1846,7 +1941,6 @@ class Field(GameState):
 			if drawn_in_board == False:
 				mouse_coords = Vec(pg.mouse.get_pos())
 				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
-
 			
 
 class Game:
@@ -1863,16 +1957,7 @@ class Game:
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(morale_card_prototype)
 
-		self.selector = None
-		self.socket = None
-		self.accepting_connections = False
-		self.connected = False
-		self.connected_to_address = None
-		self.connection_role = None
-
 		self.network_data_queue = []
-
-		self.ui_elements = []
 
 		self.connection_label = Label(	pos=(0,0),
 										font=main_menu_font_small,
@@ -1884,27 +1969,39 @@ class Game:
 										message_font=chat_message_font,
 										name_width=75,
 										message_width=400,
-										height=150)
+										log_height=150)
 
-
-
-		self.ui_elements.append(self.connection_label)
-		self.ui_elements.append(self.chat_window)
+		self.ui_container = UI_Container()
+		self.ui_container.add_ui_element(self.connection_label)
+		self.ui_container.add_ui_element(self.chat_window)
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
-			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos)
+			Input(mouse_button=1): lambda mouse_pos: self.left_mouse_pressed(mouse_pos),
+			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos)
 		}
 
 		self._state = start_state(self)
+		self.refresh_ui_group()
 
-	def left_mouse_pressed(self, mouse_pos):
-		for element in self.ui_elements:
-			element.left_mouse_pressed(mouse_pos)
+		self.selector = None
+		self.socket = None
+		self.accepting_connections = False
+		self.connected = False
+		self.connected_to_address = None
+		self.connection_role = None
+
+	def refresh_ui_group(self):
+		self.ui_group = UI_Group(ui_containers=[self.ui_container, self.state.ui_container])
 
 	def any_key_pressed(self, key, mod, unicode_key):
-		for element in self.ui_elements:
-			element.any_key_pressed(key, mod, unicode_key)
+		self.ui_group.any_key_pressed(key, mod, unicode_key)
+
+	def left_mouse_pressed(self, mouse_pos):
+		self.ui_group.left_mouse_pressed(mouse_pos)
+
+	def left_mouse_released(self, mouse_pos):
+		self.ui_group.left_mouse_released(mouse_pos)
 
 	@property
 	def state(self):
@@ -1913,7 +2010,35 @@ class Game:
 	@state.setter
 	def state(self, new_state):
 		self._state = new_state
+		self.refresh_ui_group()
 	
+	@property
+	def connected(self):
+		return self._connected
+	
+	@connected.setter
+	def connected(self, new_state):
+		if new_state == True:
+			self.connection_label.text = "Connected to %s"%str(self.connected_to_address)
+		else:
+			self.connection_label.text = ''
+
+		self._connected = new_state
+
+	@property
+	def accepting_connections(self):
+		return self._accepting_connections
+	
+	@accepting_connections.setter
+	def accepting_connections(self, new_state):
+		if new_state == True:
+			self.connection_label.text = "Accepting Connections"
+		else:
+			self.connection_label.text = ''
+		
+		self._accepting_connections = new_state
+	
+
 	def start_host(self, port):
 		self.selector = selectors.DefaultSelector()
 		host = '0.0.0.0'
@@ -1923,7 +2048,6 @@ class Game:
 		self.socket.listen()
 		self.socket.setblocking(False)
 		print("Now accepting connections %s:%s"%(host, port))
-		self.connection_label.text = "Accepting Connections"
 		self.selector.register(self.socket, selectors.EVENT_READ, data=None)
 		self.accepting_connections = True
 
@@ -1993,7 +2117,6 @@ class Game:
 	def close_connection(self):
 		if self.accepting_connections or self.connected:
 			print('Closing connection')
-			self.accepting_connections = False
 			self.selector.unregister(self.socket)
 			self.socket.close()
 
@@ -2038,20 +2161,20 @@ class Game:
 		else:
 			self.input_map[Input(key='any')](input.key, mod, unicode_key)
 
-		self.state.handle_input(input, mouse_pos, mod, unicode_key)
+		new_state = self.state.handle_input(input, mouse_pos, mod, unicode_key)
+		if new_state:
+			self.state = new_state
 
 	def update(self, dt, mouse_pos):
 		self.select()
 		self.state.update(dt, mouse_pos)
+		self.ui_group.update(dt, mouse_pos)
+		# if self.ui_group.focused_container:
+		# 	print(self.ui_group.focused_container.focused_element)
 
 	def draw(self):
 		self.state.draw()
-		for element in self.ui_elements:
-			if element == self.connection_label:
-				if self.accepting_connections or self.connected:
-					element.draw()
-			else:
-				element.draw()
+		self.ui_group.draw()
 
 def split_text(text, font, word_wrap_width):
 		lines = []
@@ -2098,14 +2221,14 @@ def draw_text(text, pos, font, color=white, word_wrap=False, word_wrap_width=Non
 
 
 class ChatWindow(UI_Element):
-	def __init__(self, name_font, message_font, name_width, message_width, height, text_color=white):
-		super().__init__()
+	def __init__(self, name_font, message_font, name_width, message_width, log_height, text_color=white, parent_container=None):
+		UI_Element.__init__(self, parent_container)
 		self.pos = (10,0)
 		self.name_font = name_font
 		self.message_font = message_font
 		self.name_width = name_width
 		self.message_width = message_width
-		self.height = height
+		self.log_height = log_height
 		self.text_color = text_color
 		self.user_colors = {"Tyler": light_red, "Simon": light_blue}
 		self.messages = [	("Tyler", "What's up?"),
@@ -2114,18 +2237,43 @@ class ChatWindow(UI_Element):
 							("Tyler", "idk"),
 							("Simon", "ye i gues so :3")]
 
-		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.height),
+		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.log_height),
 									font=message_font,
 									type='chat',
 									width=message_width+name_width)
 
-		self.ui_elements.append(self.text_entry)
+		self.ui_container = UI_Container()
+		self.ui_container.add_ui_element(self.text_entry)
+
+	@property
+	def width(self):
+		return self.message_width
+
+	@property
+	def height(self):
+		return self.log_height + self.text_entry.height
+	
+	@property
+	def rect(self):
+		return pg.Rect(self.pos, (self.width, self.height))
+	
+	def any_key_pressed(self, key, mode, unicode_key):
+		self.ui_container.any_key_pressed(key, mode, unicode_key)
+
+	def left_mouse_pressed(self, mouse_pos):
+		if self.rect.collidepoint(mouse_pos):
+			if self.parent_container:
+				self.parent_container.focus_ui_element(self)
+		self.ui_container.left_mouse_pressed(mouse_pos)
+
+	def left_mouse_released(self, mouse_pos):
+		self.ui_container.left_mouse_released(mouse_pos)
 
 	def update(self, dt, mouse_pos):
-		self.text_entry.update(dt, mouse_pos)
+		self.ui_container.update(dt, mouse_pos)
 
 	def draw(self):
-		self.text_entry.draw()
+		self.ui_container.draw()
 
 		line_spacing = self.message_font.get_linesize() + 4
 		current_line_count = 0
@@ -2134,12 +2282,12 @@ class ChatWindow(UI_Element):
 			this_line_count = len(split_text(text=message[1], font=self.message_font, word_wrap_width=self.message_width))
 			current_line_count += this_line_count
 			draw_text(	text=message[0],
-						pos=(self.pos[0], self.pos[1] + self.height - current_line_count*line_spacing),
+						pos=(self.pos[0], self.pos[1] + self.log_height - current_line_count*line_spacing),
 						font=self.name_font,
 						color = self.user_colors[message[0]],
 						word_wrap = False)
 			draw_text(	text=message[1],
-						pos=(self.name_width + self.pos[0], self.pos[1] + self.height - current_line_count*line_spacing),
+						pos=(self.name_width + self.pos[0], self.pos[1] + self.log_height - current_line_count*line_spacing),
 						font = self.message_font,
 						color = lighten_color(self.user_colors[message[0]], 0.5),
 						word_wrap = True,
