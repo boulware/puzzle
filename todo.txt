@@ -1,2 +1,5 @@
 1) Mess with sockets and get some basic netplay stuff going.
 2) When unfocusing ui_elements in a container, if you don't access unfocus through the UI_Group, then the UI_Group.focused_container won't update properly
+3) empty message in chat box glitches
+4) hitting host multiple times glitch
+5) disconnecting doesn't properly show that the connection has ended
