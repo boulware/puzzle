@@ -33,6 +33,8 @@ pink = (255,200,200)
 # Game parameters
 grid_count = (4,4)
 node_size = (90,90)
+action_panel_size = (100,100)
+action_icon_size = (20,20)
 grid_origin = (100,10)
 
 class Node: 
@@ -297,7 +299,6 @@ class HealthBar:
 	@property
 	def surface(self):
 		if not self._surface or self.dirty:
-			print('genning surface')
 			self.dirty = False
 			self._generate_surface()
 
@@ -385,11 +386,13 @@ class Card:
 		self._owner = None
 
 		self.buffs = []
+		self.actions = ['^', 'v', 'o']
 
 		self.dirty = True
 
 		self._hand_surface = None
 		self._board_surface = None
+		self._action_panel_surface = None
 
 		self._health_component = None
 		self._attack_component = None
@@ -418,7 +421,7 @@ class Card:
 
 	@property
 	def hand_surface(self):
-		if not self._hand_surface or self.dirty:
+		if self._hand_surface == None or self.dirty:
 			self.dirty = False
 			self.generate_surfaces()
 
@@ -426,12 +429,45 @@ class Card:
 
 	@property
 	def board_surface(self):
-		if not self._board_surface or self.dirty:
+		if self._board_surface == None or self.dirty:
 			self.dirty = False
 			self.generate_surfaces()
 
 		return self._board_surface
+
+	@property
+	def action_panel_surface(self):
+		if self._action_panel_surface == None:
+			self._generate_action_panel_surface()
+
+		return self._action_panel_surface
 	
+
+	def _generate_action_panel_surface(self):
+		self._action_panel_surface = pg.Surface(action_panel_size)
+
+		self.action_panel_surface.fill(black)
+
+		icon_width, icon_height = action_icon_size
+		panel_width, panel_height = action_panel_size
+		panel_count_x = panel_width // icon_width
+		panel_count_y = panel_height // icon_height
+		for i, action in enumerate(self.actions):
+			row = i // panel_count_x
+			col = i % panel_count_y
+
+			cell_pos = (col*icon_width, row*icon_height)
+			pg.draw.rect(self.action_panel_surface, dark_grey, (cell_pos, action_icon_size))
+			pg.draw.rect(self.action_panel_surface, light_grey, (cell_pos, action_icon_size), 1)
+			draw_surface_aligned(	target=self.action_panel_surface,
+									source=action_font.render(action, True, white),
+									pos=(cell_pos[0]+icon_width//2, cell_pos[1]+icon_height//2),
+									align=('center','center'))
+
+		pg.draw.rect(self.action_panel_surface, white, ((0,0), action_panel_size), 1)
+
+
+
 	def _generate_hand_surface(self):
 		bg_color = dark_grey
 		# if self.owner == 0:
@@ -498,6 +534,7 @@ class Card:
 			if hover:
 				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
 		if location == "board" or location == "board_hover":
+			screen.blit(self.action_panel_surface, (pos[0] + 100, pos[1]+5))
 			screen.blit(self.board_surface, pos)
 
 
@@ -1887,7 +1924,6 @@ class Field(GameState):
 									absolute_target_cell = target_cell
 
 								if self.board.unit_cards[absolute_target_cell] == None:
-									print('my unit moving')
 									self.board.move_unit(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
 								else:
 									self.board.fight_cards(attacker_cell=absolute_cell, defender_cell=absolute_target_cell, sync=sync)
@@ -2701,6 +2737,7 @@ card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
 node_font = pg.font.Font("Montserrat-Regular.ttf", 26)
 count_font = pg.font.Font("Montserrat-Regular.ttf", 14)
 ui_font = pg.font.Font("Montserrat-Regular.ttf", 24)
+action_font = pg.font.Font("Montserrat-Regular.ttf", 12)
 main_menu_font = pg.font.Font("Montserrat-Regular.ttf", 48)
 main_menu_font_med = pg.font.Font("Montserrat-Regular.ttf", 32)
 main_menu_font_small = pg.font.Font("Montserrat-Regular.ttf", 18)
