@@ -31,7 +31,7 @@ gold = (255,215,0)
 pink = (255,200,200)
 
 # Game parameters
-grid_count = (3,4)
+grid_count = (4,4)
 node_size = (90,90)
 grid_origin = (100,10)
 
@@ -282,125 +282,22 @@ board_card_size = (int(node_size[0]*card_proportion),node_size[1])
 
 print_callstack = traceback.print_stack
 
-class Card:
-	def __init__(self, name, cost, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
-		self.name = name
-		self.cost = cost
-		self.cell = None
-		self._owner = None
-
-		self.begin_phase_fns = begin_phase_fns
-		self.attack_phase_fns = attack_phase_fns
-		self.passive_fns = passive_fns
-		self.buffs = []
-
-		self.dirty = True
-
-		self._hand_surface = None
-		self._board_surface = None
-
-	@property
-	def hand_surface(self):
-		if not self._hand_surface or self.dirty:
-			self.dirty = False
-			self.generate_surfaces()
-
-		return self._hand_surface
-
-	@property
-	def board_surface(self):
-		if not self._board_surface or self.dirty:
-			self.dirty = False
-			self.generate_surfaces()
-
-		return self._board_surface
-	
-	def _generate_hand_surface(self):
-		bg_color = dark_grey
-		# if self.owner == 0:
-		# 	bg_color = dark_red
-		# elif self.owner == 1:
-		# 	bg_color = dark_blue
-
-		self._hand_surface = pg.Surface(hand_card_size)
-
-		pg.draw.rect(self.hand_surface, bg_color, ((0,0), hand_card_size))
-		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
-		title_surface = card_text_sm.render(self.name, True, white)
-		self.hand_surface.blit(title_surface, (5,0))
-		cost_surface = card_text_lg.render(str(self.cost), True, light_grey)
-		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
-
-	def _generate_board_surface(self):
-		self._board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
-
-	@property
-	def enemy(self):
-		if self.owner == 0:
-			return 1
-		elif self.owner == 1:
-			return 0
-		else:
-			return None
-
-	def generate_surfaces(self):
-		self._generate_hand_surface()
-		self._generate_board_surface()
-
-	@property
-	def owner(self):
-		return self._owner
-
-	@owner.setter
-	def owner(self, owner):
-		self._owner = owner
-		self.generate_surfaces()
-
-	def clone(self):
-		return Card(name = self.name,
-					cost = self.cost,
-					begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
-					attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
-					passive_fns = copy.deepcopy(self.passive_fns))
-
-	def apply_buff(self):
-		pass
-
-	def clear_buffs(self):
-		self.buffs = []
-		self.dirty = True
-
-	def do_passive(self, field):
-		for fn in self.passive_fns:
-			fn(self, field)
-
-	def do_begin_phase(self, field):
-		for fn in self.begin_phase_fns:
-			fn(self, field)
-
-	def do_attack_phase(self, field):
-		for fn in self.attack_phase_fns:
-			fn(self, field)
-
-	def draw(self, pos, location, hover=False):
-		if location == "hand":
-			screen.blit(self.hand_surface, pos)
-			if hover:
-				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
-		if location == "board" or location == "board_hover":
-			screen.blit(self.board_surface, pos)
-
 class HealthBar:
-	def __init__(self, max_health, size):
+	def __init__(self, max_health, size, health=None):
 		self.max_health = max_health
 		self.size = size
-		self.health = max_health
+
+		if health == None:
+			health = max_health
+		self._health = health
+
 		self._surface = None
 		self.dirty = True
 
 	@property
 	def surface(self):
 		if not self._surface or self.dirty:
+			print('genning surface')
 			self.dirty = False
 			self._generate_surface()
 
@@ -440,8 +337,10 @@ class HealthBar:
 
 	@health.setter
 	def health(self, health):
+		print('old health=', self._health)
 		self.dirty = True
 		self._health = health
+		print('new health=', self._health)
 	
 	def set_health(self, new_health):
 		self.dirty = True
@@ -449,60 +348,181 @@ class HealthBar:
 		self.health = new_health
 		self._clamp_health()
 
-	# def change_health(self, amount):
-	# 	if amount == 0:
-	# 		return
-	# 	self.dirty = True
+class HealthComponent:
+	def __init__(self, max_health, health=None):
+		self.max_health = max_health
+		if health == None:
+			health = max_health
 
-	# 	self.health += amount
-	# 	self._clamp_health()
-
-class CreatureCard(Card):
-	def __init__(self, name, cost, base_power, base_max_health, begin_phase_fns=[], attack_phase_fns=[], passive_fns=[]):
-		Card.__init__(self=self, name=name, cost=cost, begin_phase_fns=begin_phase_fns, attack_phase_fns=attack_phase_fns)
-
-		self.health_bar = HealthBar(base_max_health, (15,100))
-
-		self._base_power = base_power
-		self._base_max_health = base_max_health
-		self.health = base_max_health
-
-	@property
-	def power(self):
-		power = self._base_power
-		for buff in self.buffs:
-			power += buff[0]
-
-		return power
-
-	@property
-	def max_health(self):
-		max_health = self._base_max_health
-		for buff in self.buffs:
-			max_health += buff[1]
-
-		return max_health
+		self._health = health
+		self.health_bar = HealthBar(max_health=max_health, size=(15,80), health=health)
+		self._clamp_health()
 
 	@property
 	def health(self):
 		return self._health
 
 	@health.setter
-	def health(self, health):
-		self.dirty = True
-		self._health = health
+	def health(self, value):
+		self._health = value
 		self._clamp_health()
+		self.health_bar.set_health(self._health)
 
-		self.health_bar.set_health(self.health)
-
-	def move(self):
-		pass
+	def _clamp_health(self):
+		self._health = clamp(self._health, 0, self.max_health)
 
 	def change_health(self, amount):
 		self.health += amount
 
-	def _clamp_health(self):
-		self._health = np.clip(self.health, 0, self.max_health)
+	def draw(self, pos):
+		screen.blit(self.health_bar.surface, pos)
+
+class Card:
+	def __init__(self, name, cost):
+		self.name = name
+		self.cost = cost
+		self.cell = None
+		self._owner = None
+
+		self.buffs = []
+
+		self.dirty = True
+
+		self._hand_surface = None
+		self._board_surface = None
+
+		self._health_component = None
+		self._attack_component = None
+
+	@property
+	def health(self):
+		return self._health_component.health
+
+	@health.setter
+	def health(self, health):
+		if self._health_component != None:
+			self.dirty = True
+			self._health_component.health = health
+			self.health_bar.set_health(self.health)
+
+	def change_health(self, amount):
+		if self._health_component != None:
+			self.dirty = True
+			self._health_component.change_health(amount)
+
+	@property
+	def max_health(self):
+		if self._health_component != None:
+			return self._health_component.max_health
+	
+
+	@property
+	def hand_surface(self):
+		if not self._hand_surface or self.dirty:
+			self.dirty = False
+			self.generate_surfaces()
+
+		return self._hand_surface
+
+	@property
+	def board_surface(self):
+		if not self._board_surface or self.dirty:
+			self.dirty = False
+			self.generate_surfaces()
+
+		return self._board_surface
+	
+	def _generate_hand_surface(self):
+		bg_color = dark_grey
+		# if self.owner == 0:
+		# 	bg_color = dark_red
+		# elif self.owner == 1:
+		# 	bg_color = dark_blue
+
+		self._hand_surface = pg.Surface(hand_card_size)
+
+		pg.draw.rect(self.hand_surface, bg_color, ((0,0), hand_card_size))
+		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
+		title_surface = card_text_sm.render(self.name, True, white)
+		self.hand_surface.blit(title_surface, (5,0))
+		cost_surface = card_text_lg.render(str(self.cost), True, light_grey)
+		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
+
+		if self._health_component != None:
+			# Draw health bar
+			draw_surface_aligned(	target=self.hand_surface,
+									source=self._health_component.health_bar.surface,
+									pos=hand_card_size,
+									align=('right','down'),
+									offset=(-1,-1))
+
+	def _generate_board_surface(self):
+		self._board_surface = pg.transform.smoothscale(self.hand_surface, board_card_size)
+
+	@property
+	def enemy(self):
+		if self.owner == 0:
+			return 1
+		elif self.owner == 1:
+			return 0
+		else:
+			return None
+
+	def generate_surfaces(self):
+		self._generate_hand_surface()
+		self._generate_board_surface()
+
+	@property
+	def owner(self):
+		return self._owner
+
+	@owner.setter
+	def owner(self, owner):
+		self._owner = owner
+		self.generate_surfaces()
+
+	def clone(self):
+		return Card(name = self.name,
+					cost = self.cost)
+
+	def apply_buff(self):
+		pass
+
+	def clear_buffs(self):
+		self.buffs = []
+		self.dirty = True
+
+	def draw(self, pos, location, hover=False):
+		if location == "hand":
+			screen.blit(self.hand_surface, pos)
+			if hover:
+				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
+		if location == "board" or location == "board_hover":
+			screen.blit(self.board_surface, pos)
+
+
+class BuildingCard(Card):
+	def __init__(self, name, cost, max_health, enter_fns=[]):
+		Card.__init__(self=self, name=name, cost=cost)
+		print('building')
+
+class CreatureCard(Card):
+	def __init__(self, name, cost, base_power, max_health, health=None):
+		Card.__init__(self=self, name=name, cost=cost)
+
+		self.health_bar = HealthBar(max_health, (15,100))
+
+		self.base_power = base_power
+		# self._base_max_health = base_max_health
+		# self.health = base_max_health
+		self._health_component = HealthComponent(max_health=max_health, health=health)
+
+	@property
+	def power(self):
+		return self.base_power
+
+	def move(self):
+		pass
 
 	def _generate_hand_surface(self):
 		Card._generate_hand_surface(self)
@@ -515,13 +535,6 @@ class CreatureCard(Card):
 								pos=bottomleft,
 								align=('left','down'),
 								offset=(6,-4))
-
-		# Draw health bar
-		draw_surface_aligned(	target=self.hand_surface,
-								source=self.health_bar.surface,
-								pos=hand_card_size,
-								align=('right','down'),
-								offset=(-1,-1))
 
 		health_text = card_text_med.render(str(self.health), True, red)
 		draw_surface_aligned(	target=self.hand_surface,
@@ -554,11 +567,9 @@ class CreatureCard(Card):
 	def clone(self):
 		return CreatureCard(name = self.name,
 							cost = self.cost,
-							base_power = self._base_power,
-							base_max_health = self._base_max_health,
-							begin_phase_fns = copy.deepcopy(self.begin_phase_fns),
-							attack_phase_fns = copy.deepcopy(self.attack_phase_fns),
-							passive_fns = copy.deepcopy(self.passive_fns))
+							base_power = self.base_power,
+							max_health = self.max_health,
+							health = self.health)
 
 class CardPool:
 	def __init__(self):
@@ -1687,9 +1698,8 @@ class Field(GameState):
 		self.hands = [Hand(self), Hand(self)]
 
 		for _, hand in enumerate(self.hands):
-			hand.add_card("Potion")
-			hand.add_card("Goblin", 2)
-			hand.add_card("Morale")
+			hand.add_card("Goblin", 1)
+			hand.add_card("Drone", 3)
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 
@@ -1747,7 +1757,6 @@ class Field(GameState):
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_pressed(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: self.space_pressed(),
 			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
-			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.player_turn].add_card("Morale"),
 			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.player_turn].clear_hand(),
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu()
 		}
@@ -1805,7 +1814,7 @@ class Field(GameState):
 
 			if self.is_current_player_active() and self.phase.name == 'Build':
 				result = self.board.grid.get_lane_at_pos(pos=mouse_pos)
-				if result['hit'] == True:
+				if result['hit'] == True and isinstance(self.drag_card, CreatureCard):
 					lane_number = result['cell'][0]
 					lane_card = self.queued_cards[self.player_number][lane_number]
 					if lane_card != None:
@@ -1864,25 +1873,33 @@ class Field(GameState):
 					else:
 						absolute_cell = cell
 
-					card = self.board[absolute_cell]
-					if card != None and card.owner == self.player_turn:
-						if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
-							if isinstance(card, CreatureCard):
-								self.board.delete_card_from_board(cell=absolute_cell, sync=sync)
-								self.change_health(amount=-card.power, player=card.enemy, sync=sync)
-						else:
-							target_cell = (cell[0], cell[1]+1)
-							if self.player_turn == 0:
-								absolute_target_cell = (target_cell[0], self.board.rank_count-1-target_cell[1]) # Corrected for player orientation (actual grid coords)
+					card = self.board.unit_cards[absolute_cell]
+					if card != None and isinstance(card, CreatureCard):
+						if card != None and card.owner == self.player_turn:
+							if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
+									self.board.delete_unit_from_board(cell=absolute_cell, sync=sync)
+									self.change_health(amount=-card.power, player=card.enemy, sync=sync)
 							else:
-								absolute_target_cell = target_cell
+								target_cell = (cell[0], cell[1]+1)
+								if self.player_turn == 0:
+									absolute_target_cell = (target_cell[0], self.board.rank_count-1-target_cell[1]) # Corrected for player orientation (actual grid coords)
+								else:
+									absolute_target_cell = target_cell
 
-							self.board.move_card(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
+								if self.board.unit_cards[absolute_target_cell] == None:
+									print('my unit moving')
+									self.board.move_unit(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
+								else:
+									self.board.fight_cards(attacker_cell=absolute_cell, defender_cell=absolute_target_cell, sync=sync)
 
 			# Transfer queued cards to battlefield in closest rank
 			for lane_number, queued_card in enumerate(self.queued_cards[self.player_turn]):
 				if queued_card != None:
-					cell = (lane_number, self.board.size[1]-1)
+					if self.player_turn == 0:
+						cell = (lane_number, self.board.size[1]-1)
+					elif self.player_turn == 1:
+						cell = (lane_number, 0)
+
 					self.board.place_card(cell=cell, card=queued_card, owner=self.player_turn, sync=sync)
 					self.queued_cards[self.player_number][lane_number] = None
 
@@ -1901,23 +1918,27 @@ class Field(GameState):
 
 	def process_network_data(self, data):
 		raw_data_string = data.decode('utf-8')
-		event_strings = raw_data_string.split('[END]')
+		event_strings = raw_data_string.split(';[END]')
 		for event_string in event_strings:
 			print('event_string=', event_string)
 			args = event_string.split(';')
 			try:
 				if args[0] == 'card placed':
 					# This doesn't have permanence in card values (like creature health), since it only sends the card name
+					# However, maybe this is ok, if this is only used when the card is played from hand or moved on from lane queue
 					self.board.place_card(cell=(int(args[2]),int(args[3])), card=self.game.card_pool.get_card_by_name(args[1]), owner=args[4], sync=False)
-				elif args[0] == 'card deleted':
-					print(args[1])
-					print(args[2])
-					print('calling delete_card_from_board')
-					print(self.board)
-					self.board.delete_card_from_board(cell=(int(args[1]), int(args[2])), sync=False)
-					print('after calling delete_card_from_board')
+				elif args[0] == 'unit deleted':
+					self.board.delete_unit_from_board(cell=(int(args[1]), int(args[2])), sync=False)
+				elif args[0] == 'building deleted':
+					self.board.delete_building_from_board(cell=(int(args[1]), int(args[2])), sync=False)
+				elif args[0] =='unit moved':
+					self.board.move_unit(start_cell=(int(args[1]), int(args[2])), target_cell=(int(args[3]),int(args[4])), sync=False)
+				elif args[0] =='building moved':
+					self.board.move_building(start_cell=(int(args[1]), int(args[2])), target_cell=(int(args[3]),int(args[4])), sync=False)				
 				elif args[0] == 'card removed':
 					self.board.return_card_to_hand((int(args[2]), int(args[3])))
+				elif args[0] == 'cards fought':
+					self.board.fight_cards(attacker_cell=(int(args[1]), int(args[2])), defender_cell=(int(args[3]), int(args[4])), sync=False)
 				elif args[0] == 'turn ended':
 					self._end_turn(sync=False)
 				elif args[0] == 'phase advanced':
@@ -2076,13 +2097,13 @@ class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
-		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: field.change_health(amount=1, player=self.owner, sync=True)])
-		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
-		morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self, field: field.board.buff_creatures_in_range(power=1,max_health=1,cell=self.cell,distance=2)])
+		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, max_health=2)
+		drone_card_prototype = CreatureCard(name="Drone", cost=1, base_power=0, max_health=1)
+		# blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4)
 
-		self.card_pool.add_card(potion_card_prototype)
 		self.card_pool.add_card(goblin_card_prototype)
-		self.card_pool.add_card(morale_card_prototype)
+		self.card_pool.add_card(drone_card_prototype)
+		# self.card_pool.add_card(blacksmith_card_prototype)
 
 		self.network_data_queue = []
 
@@ -2487,20 +2508,19 @@ class ChatWindow(UI_Element):
 						word_wrap_width = self.message_width)
 
 
-
-
 class Board:
 	def __init__(self, field, size):
 		self.field = field
 
 		self.size = size
-		self.cards = np.full(size, None, np.dtype(Card))
+		self.building_cards = np.full(size, None, np.dtype(BuildingCard))
+		self.unit_cards = np.full(size, None, np.dtype(CreatureCard))
 		grid_origin = (screen_size[0]//2-int((size[0]*node_size[0])//2), screen_size[1]//2-int((size[1]*node_size[1])//2))
 		self.grid = Grid(dimensions=size, origin=grid_origin, cell_size=node_size)
 
-	def __getitem__(self, key):
-		if len(key) == 2:
-			return self.cards[key[0],key[1]]
+	# def __getitem__(self, key):
+	# 	if len(key) == 2:
+	# 		return self.cards[key[0],key[1]]
 
 	@property
 	def lane_count(self):
@@ -2509,15 +2529,17 @@ class Board:
 	@property
 	def rank_count(self):
 		return self.size[1]
-	
-	
 
 	def place_card(self, cell, card, owner, sync):
 		if self.grid.check_cell_valid(cell) == True and card != None:
+			if isinstance(card, BuildingCard):
+				sub_board = self.building_cards
+			else:
+				sub_board = self.unit_cards
+
 			card.cell = cell
 			card.owner = owner
-			self.cards[cell] = card
-			self._refresh_passives()
+			sub_board[cell] = card
 
 			if sync == True:
 				send_string = 'card placed;' + card.name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';' + str(owner) + ';[END]'
@@ -2528,31 +2550,77 @@ class Board:
 			print("Tried to place card in invalid cell or tried to place None card")
 			return False
 
-	def delete_card_from_board(self, cell, sync):
-		print("deleting card: ", self.cards[cell])
-		if self.cards[cell] != None:
-			self.cards[cell] = None
-			self._refresh_passives()
+	def delete_unit_from_board(self, cell, sync):
+		if self.unit_cards[cell] != None:
+			self.unit_cards[cell] = None
 
 			if sync == True:
-				send_string = 'card deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
+				send_string = 'unit deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
 				self.field.game.queue_network_data(send_string.encode('utf-8'))
 
-	def move_card(self, start_cell, target_cell, sync):
-		if self[target_cell] == None:
-			card=self[start_cell]
+	def delete_building_from_board(self, cell, sync):
+		if self.building_cards[cell] != None:
+			self.building_cards[cell] = None
+
+			if sync == True:
+				send_string = 'building deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
+				self.field.game.queue_network_data(send_string.encode('utf-8'))
+
+	def move_unit(self, start_cell, target_cell, sync):
+		if self.unit_cards[target_cell] == None:
+
+			card = self.unit_cards[start_cell]
 			self.place_card(cell=target_cell, card=card, owner=card.owner, sync=sync)
-			self.delete_card_from_board(start_cell, sync=sync)
+			self.delete_unit_from_board(start_cell, sync=sync)
+
+		if sync == True:
+			send_string = 'unit moved;' + 	str(start_cell[0]) + ';' + str(start_cell[1]) + ';' + str(target_cell[0]) + ';' + str(target_cell[1]) + ';[END]'
+			self.field.game.queue_network_data(send_string.encode('utf-8'))
+
+	def move_building(self, start_cell, target_cell, sync):
+		if self.building_cards[target_cell] == None:
+
+			card = building_cards[start_cell]
+			self.place_card(cell=target_cell, card=card, owner=card.owner, sync=sync)
+			self.delete_building_from_board(start_cell, sync=sync)
+
+		if sync == True:
+			send_string = 'building moved;' + 	str(start_cell[0]) + ';' + str(start_cell[1]) + ';' + str(target_cell[0]) + ';' + str(target_cell[1]) + ';[END]'
+			self.field.game.queue_network_data(send_string.encode('utf-8'))		
+
 
 	def return_card_to_hand(self, cell):
-		if self.cards[cell] != None:
-			self.cards[cell].owner = None
-			card_name = self.cards[cell].name
-			self.field.active_hand.add_card(name=card_name)
-			self.cards[cell] = None
-			self._refresh_passives()
+		pass
+		# if self.cards[cell] != None:
+		# 	self.cards[cell].owner = None
+		# 	card_name = self.cards[cell].name
+		# 	self.field.active_hand.add_card(name=card_name)
+		# 	self.cards[cell] = None
+		# 	self._refresh_passives()
 
-			return card_name
+		# 	return card_name
+
+	def fight_cards(self, attacker_cell, defender_cell, sync):
+		try:
+			attacker = self.unit_cards[attacker_cell]
+			defender = self.unit_cards[defender_cell]
+
+			defender.change_health(-attacker.power)
+			attacker.change_health(-defender.power)
+
+			if defender.health <= 0:
+				self.delete_unit_from_board(cell=defender_cell, sync=sync)
+			if attacker.health <= 0:
+				self.delete_unit_from_board(cell=attacker_cell, sync=sync)
+
+			if sync == True:
+				send_string = 'cards fought;' + str(attacker_cell[0]) + ';' + str(attacker_cell[1]) + ';' + str(defender_cell[0]) + ';' + str(defender_cell[1]) + ';[END]'
+				self.field.game.queue_network_data(send_string.encode('utf-8'))
+		except IndexError:
+			print('Tried to fight cards in invalid cells')
+		except AttributeError:
+			print('Tried to fight None card')
+
 
 	# def get_frontmost_occupied_cell(self, player, lane):
 	# 	ranks = range(self.)
@@ -2575,37 +2643,30 @@ class Board:
 
 
 	def _refresh_passives(self):
-		dirty = False
+		pass 
+		# dirty = False
 
-		self._clear_buffs()
-		self.do_passive()
+		# self._clear_buffs()
+		# self.do_passive()
 
-		if dirty == True:
-			self._refresh_passives() # Iterative refreshes when state has changed
-			# This is necessary because of the complex interactions between cards
+		# if dirty == True:
+		# 	self._refresh_passives() # Iterative refreshes when state has changed
+		# 	# This is necessary because of the complex interactions between cards
 
 	def _clear_buffs(self):
-		for _, card in np.ndenumerate(self.cards):
-			if card != None:
-				card.clear_buffs()
+		pass
+		# for _, card in np.ndenumerate(self.cards):
+		# 	if card != None:
+		# 		card.clear_buffs()
 
 
 	def buff_creatures_in_range(self, power, max_health, cell, distance=1):
-		if cell:
-			cell_coords = self.grid.get_cells_by_distance(start_cell=cell, distance=distance)
-			for cell_coord in cell_coords:
-				if isinstance(self.cards[cell_coord], CreatureCard):
-					self.cards[cell_coord].apply_buff(power=1,max_health=1)
-
-	def do_passive(self):
-		for _, card in np.ndenumerate(self.cards):
-			if card != None:
-				card.do_passive(self.field)
-
-	def do_begin_phase(self):
-		for _, card in np.ndenumerate(self.cards):
-			if card != None:
-				card.do_begin_phase(self.field)
+		pass
+		# if cell:
+		# 	cell_coords = self.grid.get_cells_by_distance(start_cell=cell, distance=distance)
+		# 	for cell_coord in cell_coords:
+		# 		if isinstance(self.cards[cell_coord], CreatureCard):
+		# 			self.cards[cell_coord].apply_buff(power=1,max_health=1)
 
 	def draw(self, player_perspective=0):
 		self.grid.draw(grey, player_perspective=player_perspective)
@@ -2613,7 +2674,7 @@ class Board:
 		# Draw the cards in the board
 		for x in range(self.size[0]):
 			for y in range(self.size[1]):
-				card = self.cards[x][y]
+				card = self.unit_cards[x][y]
 				if card != None:
 					if player_perspective == 1:
 						y = self.size[1] - 1 - y
