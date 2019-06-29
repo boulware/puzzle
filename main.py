@@ -31,7 +31,7 @@ gold = (255,215,0)
 pink = (255,200,200)
 
 # Game parameters
-grid_count = (5,6)
+grid_count = (3,4)
 node_size = (90,90)
 grid_origin = (100,10)
 
@@ -117,11 +117,11 @@ class Grid:
 		return True
 
 	# Returns whether the cell is on 'player 0's (return 0) side of the board or 'player 1's (return 1)
-	def get_cell_owner(self, cell):
-		if cell[1] >= 0 and cell[1] <= 2:
-			return 1
-		if cell [1] >= 3 and cell[1] <= 5:
-			return 0
+	# def get_cell_owner(self, cell):
+	# 	if cell[1] >= 0 and cell[1] <= 2:
+	# 		return 1
+	# 	if cell [1] >= 3 and cell[1] <= 5:
+	# 		return 0
 
 	def get_cells_by_distance(self, start_cell, distance): # Using Chebyshev distance (King's distance)
 		distance = max(0, distance) # Clamp distance to a non-negative value
@@ -137,8 +137,8 @@ class Grid:
 		return [(x,y) for x in range(min_x,max_x+1) for y in range(min_y,max_y+1)]
 
 	# Return the cell position. Align lets you choose among the corners, centers of edges, or center. Default params top left corner
-	def get_cell_pos(self, grid_coords, align=('left','up')):
-		pos = [self.rect[i] + grid_coords[i]*self.cell_size[i] for i in range(2)]
+	def get_cell_pos(self, cell, align=('left','up')):
+		pos = [self.rect[i] + cell[i]*self.cell_size[i] for i in range(2)]
 		
 		if align[0] == 'center':
 			pos[0] += self.cell_size[0]//2
@@ -170,6 +170,18 @@ class Grid:
 		pos[1] += offset[1]
 
 		return pos
+
+	def get_lane_at_pos(self, pos=None):
+		if pos == None:
+			pos = pg.mouse.get_pos()
+		hit = False
+		cell_x = (pos[0] - self.rect.x) // self.cell_size[0]
+		cell_y = (pos[1] - self.rect.y) // self.cell_size[1]
+
+		if cell_x >= 0 and cell_x < self.dimensions[0] and cell_y >= 0 and cell_y < self.dimensions[1]:
+			hit = True
+
+		return {'hit': hit, 'cell': (cell_x, cell_y)}
 
 	def get_cell_at_mouse(self, mouse_pos=None):
 		hit = False
@@ -222,7 +234,7 @@ class Grid:
 		else:
 			return True
 
-	def draw_surface_in_cell(self, source, grid_coords, align=('left','up'), stretch=False, offset=(0,0)):
+	def draw_surface_in_cell(self, source, cell, align=('left','up'), stretch=False, offset=(0,0)):
 		surface = source
 
 		if stretch == True:
@@ -242,7 +254,7 @@ class Grid:
 				new_height = int(source.get_height()/scale_ratio)
 				surface = pg.transform.scale(source, (new_width,new_height)) # new scaled surface
 
-		cell_pos = self.get_cell_pos(grid_coords, align)
+		cell_pos = self.get_cell_pos(cell, align)
 		draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
 
 def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0), alpha=255):
@@ -282,7 +294,6 @@ class Card:
 		self.passive_fns = passive_fns
 		self.buffs = []
 
-		self.active = False
 		self.dirty = True
 
 		self._hand_surface = None
@@ -360,19 +371,16 @@ class Card:
 		self.dirty = True
 
 	def do_passive(self, field):
-		if self.active:
-			for fn in self.passive_fns:
-				fn(self, field)
+		for fn in self.passive_fns:
+			fn(self, field)
 
 	def do_begin_phase(self, field):
-		if self.active:
-			for fn in self.begin_phase_fns:
-				fn(self, field)
+		for fn in self.begin_phase_fns:
+			fn(self, field)
 
 	def do_attack_phase(self, field):
-		if self.active:
-			for fn in self.attack_phase_fns:
-				fn(self, field)
+		for fn in self.attack_phase_fns:
+			fn(self, field)
 
 	def draw(self, pos, location, hover=False):
 		if location == "hand":
@@ -381,9 +389,6 @@ class Card:
 				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
 		if location == "board" or location == "board_hover":
 			screen.blit(self.board_surface, pos)
-
-		if self.active == False and location == "board":
-			pg.draw.line(screen, red, pos, (pos[0]+board_card_size[0], pos[1]+board_card_size[1]))
 
 class HealthBar:
 	def __init__(self, max_health, size):
@@ -490,6 +495,9 @@ class CreatureCard(Card):
 
 		self.health_bar.set_health(self.health)
 
+	def move(self):
+		pass
+
 	def change_health(self, amount):
 		self.health += amount
 
@@ -593,7 +601,7 @@ class Hand:
 			for _ in range(count):
 				self.cards.append(card.clone())
 		else:
-			print_stack()
+			print_callstack()
 			print("Tried to add non-existent card to hand.")
 
 	def pop_card(self, index):
@@ -1503,12 +1511,12 @@ class MainMenu(GameState):
 		if self.list_menu.confirmed_index != None:
 			selected_text = self.list_menu.confirmed_item_text
 			if selected_text == 'Start SP Game':
-				self.queue_state_transition(Field(self.game, 0))
+				self.queue_state_transition(Field(self.game, 0, game_type='SP'))
 			elif selected_text == 'Start MP Game':
 				if self.game.connection_role == 'host':
-					self.queue_state_transition(Field(self.game, 0))
+					self.queue_state_transition(Field(self.game, 0, game_type='MP'))
 				elif self.game.connection_role == 'client':
-					self.queue_state_transition(Field(self.game, 1))
+					self.queue_state_transition(Field(self.game, 1, game_type='MP'))
 			elif selected_text == 'Host':
 				self.queue_state_transition(HostMenu(self.game))
 			elif selected_text == 'Connect':
@@ -1670,30 +1678,26 @@ def lighten_color(color, amount):
 		return color
 
 class Field(GameState):
-	def __init__(self, game, player_number, game_type='SP'):
+	def __init__(self, game, player_number, game_type):
 		GameState.__init__(self, game)
 
 		self.player_number = player_number
 		self.game_type = game_type
 		self.board = Board(self, grid_count)
-		self.hands = {
-			0: Hand(self), # Hand for player 0
-			1: Hand(self) # ..	 ..  ..     1
-		}
-		for _, hand in self.hands.items():
+		self.hands = [Hand(self), Hand(self)]
+
+		for _, hand in enumerate(self.hands):
 			hand.add_card("Potion")
-			hand.add_card("Mountain", 3)
 			hand.add_card("Goblin", 2)
 			hand.add_card("Morale")
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
-		self.cards_played = 0 # Tracks number of cards played on current turn
 
 		self.player_healths = [20,20]
 		self.hand_area_height = 80
 
 
-		self.phase = Phase(['End'])
+		self.phase = Phase(['Build','Move'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
 
 		self.hand_origin = Vec(self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50)))
@@ -1701,6 +1705,10 @@ class Field(GameState):
 		self.hand_spacing = Vec(110,0)
 		self.drag_card = None
 		self.card_grab_point = None
+
+
+		self.player_count = 2
+		self.queued_cards = [[None]*grid_count[0] for i in range(self.player_count)]
 
 		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
 									align=('right','up'),
@@ -1738,17 +1746,20 @@ class Field(GameState):
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_pressed(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: self.space_pressed(),
-			Input(key=pg.K_1): lambda mouse_pos: self.hands[self.player_turn].add_card("Mountain"),
 			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
 			Input(key=pg.K_3): lambda mouse_pos: self.hands[self.player_turn].add_card("Morale"),
 			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.player_turn].clear_hand(),
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu()
 		}
 
-	def change_health(self, amount, player):
+	def change_health(self, amount, player, sync):
 		if player == 0 or player == 1:
 			self.player_healths[player] += amount
 			self.player_health_labels[player].text = 'Player %d: %d'%(player, self.player_healths[player])
+
+			if sync == True:
+				send_string = 'health changed;' + str(amount) + ';' + str(player) + ';[END]'
+				self.game.queue_network_data(send_string.encode('utf-8'))
 		else:
 			print("Tried to change health of invalid player.")
 
@@ -1766,9 +1777,8 @@ class Field(GameState):
 		return pg.Rect((hand_left, self.hand_center[1]), (self.active_hand.card_count*self.hand_spacing[0], hand_card_size[1]))
 	
 	def space_pressed(self):
-		if self.game_type == 'MP' and not self.is_current_player_active():
-			return
-		self._advance_turn()
+		if self.game_type == 'SP' or self.is_current_player_active():
+			self._advance_turn(sync=True)
 
 
 	def left_mouse_pressed(self, mouse_pos):
@@ -1793,19 +1803,16 @@ class Field(GameState):
 		if self.drag_card:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
-			if self.is_current_player_active():
-				result = self.board.grid.get_cell_at_mouse()
-				if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-					if self.cards_played < 1:
-						if self.player_number == 0:
-							pos = result['cell']
-						elif self.player_number == 1:
-							pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
-						if self.board.cards[pos] == None and self.board.grid.get_cell_owner(pos) == self.player_number:
-							placed_in_board = self.board.place_card(pos, self.drag_card)
-							send_string = 'card placed;' + self.drag_card.name + ';' + str(pos[0]) + ';' + str(pos[1]) + ';[END]'
-							self.game.queue_network_data(send_string.encode('utf-8'))
-							self.cards_played += 1
+			if self.is_current_player_active() and self.phase.name == 'Build':
+				result = self.board.grid.get_lane_at_pos(pos=mouse_pos)
+				if result['hit'] == True:
+					lane_number = result['cell'][0]
+					lane_card = self.queued_cards[self.player_number][lane_number]
+					if lane_card != None:
+						self.active_hand.add_card(name=lane_card.name)
+
+					self.queued_cards[self.player_number][lane_number] = self.drag_card
+					placed_in_board = True
 			
 			if placed_in_board == False:
 				self.active_hand.add_card(name=self.drag_card.name)
@@ -1813,12 +1820,13 @@ class Field(GameState):
 			self.drag_card = None
 			self.card_grab_point = None # Probably not necessary
 
+		# TODO: Move this to the proper place (the event queue?)
 		if self.turn_button.left_mouse_released(mouse_pos): # if button was pressed
 			if self.game_type == 'SP':
-				self._end_turn()
+				self._end_turn(sync=True)
 			elif self.game_type == 'MP':
 				if self.is_current_player_active():
-					self._end_turn()
+					self._end_turn(sync=True)
 	
 	def right_mouse_pressed(self, mouse_pos):
 		result = self.board.grid.get_cell_at_mouse(mouse_pos)
@@ -1833,7 +1841,7 @@ class Field(GameState):
 
 	def set_active_player(self, player_number):
 		self.player_turn = player_number
-		self._end_turn()
+		self._end_turn(sync=True)
 
 	def swap_active_player(self):
 		if self.player_turn == 0:
@@ -1841,17 +1849,44 @@ class Field(GameState):
 		elif self.player_turn == 1:
 			self.player_turn = 0
 
-	def _end_turn(self):
-		end_of_turn = self._advance_turn()
+	def _end_turn(self, sync):
+		end_of_turn = self._advance_turn(sync=sync)
 		while end_of_turn == False:
-			end_of_turn = self._advance_turn()
+			end_of_turn = self._advance_turn(sync=sync)
 
-	def _advance_turn(self):
-		if self.phase.name == "End":
-			self.board.do_begin_phase()
-			self.board.do_attack_phase()
+	def _advance_turn(self, sync):
+		if self.phase.name == "Move":
+			for lane in range(self.board.lane_count):
+				for rank in range(self.board.rank_count)[::-1]:
+					cell = (lane,rank) # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
+					if self.player_turn == 0:
+						absolute_cell = (cell[0], self.board.rank_count-1-cell[1]) # Corrected for player orientation (actual grid coords)
+					else:
+						absolute_cell = cell
 
-		if self.is_current_player_active():
+					card = self.board[absolute_cell]
+					if card != None and card.owner == self.player_turn:
+						if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
+							if isinstance(card, CreatureCard):
+								self.board.delete_card_from_board(cell=absolute_cell, sync=sync)
+								self.change_health(amount=-card.power, player=card.enemy, sync=sync)
+						else:
+							target_cell = (cell[0], cell[1]+1)
+							if self.player_turn == 0:
+								absolute_target_cell = (target_cell[0], self.board.rank_count-1-target_cell[1]) # Corrected for player orientation (actual grid coords)
+							else:
+								absolute_target_cell = target_cell
+
+							self.board.move_card(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
+
+			# Transfer queued cards to battlefield in closest rank
+			for lane_number, queued_card in enumerate(self.queued_cards[self.player_turn]):
+				if queued_card != None:
+					cell = (lane_number, self.board.size[1]-1)
+					self.board.place_card(cell=cell, card=queued_card, owner=self.player_turn, sync=sync)
+					self.queued_cards[self.player_number][lane_number] = None
+
+		if sync == True:
 			send_string = 'phase advanced' + ';[END]'
 			self.game.queue_network_data(send_string.encode('utf-8'))
 
@@ -1860,7 +1895,6 @@ class Field(GameState):
 		if self.phase.turn_ended == True:
 			self.phase.end_turn()
 			self.swap_active_player()
-			self.cards_played = 0
 			return True
 		else:
 			return False
@@ -1869,23 +1903,31 @@ class Field(GameState):
 		raw_data_string = data.decode('utf-8')
 		event_strings = raw_data_string.split('[END]')
 		for event_string in event_strings:
+			print('event_string=', event_string)
 			args = event_string.split(';')
 			try:
 				if args[0] == 'card placed':
-					self.board.place_card((int(args[2]),int(args[3])),self.game.card_pool.get_card_by_name(args[1]))
+					# This doesn't have permanence in card values (like creature health), since it only sends the card name
+					self.board.place_card(cell=(int(args[2]),int(args[3])), card=self.game.card_pool.get_card_by_name(args[1]), owner=args[4], sync=False)
+				elif args[0] == 'card deleted':
+					print(args[1])
+					print(args[2])
+					print('calling delete_card_from_board')
+					print(self.board)
+					self.board.delete_card_from_board(cell=(int(args[1]), int(args[2])), sync=False)
+					print('after calling delete_card_from_board')
 				elif args[0] == 'card removed':
 					self.board.return_card_to_hand((int(args[2]), int(args[3])))
 				elif args[0] == 'turn ended':
-					print('turn ended')
-					self._end_turn()
+					self._end_turn(sync=False)
 				elif args[0] == 'phase advanced':
-					self._advance_turn()
+					self._advance_turn(sync=False)
 				elif args[0] == 'health changed':
-					self.change_health(int(args[1]), int(args[2]))
+					self.change_health(amount=int(args[1]), player=int(args[2]), sync=False)
 				elif args[0] == 'message sent':
 					self.chat_window.add_message(args[1], args[2])
 			except:
-				pass
+				print('Invalid arguments for network event string')
 
 	def go_to_main_menu(self):
 		send_string = 'quit field' + ';[END]'
@@ -1935,6 +1977,12 @@ class Field(GameState):
 		# Draw board
 		self.board.draw(player_perspective=self.player_number)
 
+		for lane_number, queued_card in enumerate(self.queued_cards[self.player_number]):
+			if queued_card != None:
+				pos = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('center','down'))
+				pos[0] -= board_card_size[0]//2
+				queued_card.draw(pos=pos, location='board')
+
 		# Calculate colors for card areas based on which player is active
 		if self.is_current_player_active():
 			my_card_area_color = darken_color(current_player_color,0.65)
@@ -1967,7 +2015,7 @@ class Field(GameState):
 			else:
 				hover = False
 
-			self.active_hand[i].draw(pos=card_pos, location='hand', hover=(i==self.hovered_card_index))
+			self.active_hand[i].draw(pos=card_pos, location='hand', hover=hover)
 
 		# Draw active player text and circle
 		active_player_text = "Player %d"%self.player_turn
@@ -1998,18 +2046,27 @@ class Field(GameState):
 		if self.drag_card:
 			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
 
-			result = self.board.grid.get_cell_at_mouse()
-			if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-				if self.player_number == 0:
-					pos = result['cell']
-				elif self.player_number == 1:
-					pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
-				if self.board.cards[pos] == None:
-					cell_top_left = self.board.grid.get_cell_pos(result['cell'], align=('center','top'))
-					cell_top_left[0] -= board_card_size[0]//2
-					self.drag_card.draw(cell_top_left, "board_hover")
-					drawn_in_board = True
+			# result = self.board.grid.get_cell_at_mouse()
+			# if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
+			# 	if self.player_number == 0:
+			# 		pos = result['cell']
+			# 	elif self.player_number == 1:
+			# 		pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
+			# 	if self.board.cards[pos] == None:
+			# 		cell_top_left = self.board.grid.get_cell_pos(result['cell'], align=('center','top'))
+			# 		cell_top_left[0] -= board_card_size[0]//2
+			# 		self.drag_card.draw(cell_top_left, "board_hover")
+			# 		drawn_in_board = True
 			
+			if self.is_current_player_active() and self.phase.name == 'Build':
+				result = self.board.grid.get_lane_at_pos()
+				if result['hit'] == True:
+					lane_number = result['cell'][0]
+					lane_down_center = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('center','down'))
+					lane_down_center[0] -= board_card_size[0]//2
+					self.drag_card.draw(lane_down_center, "board_hover")
+					drawn_in_board = True
+
 			if drawn_in_board == False:
 				mouse_coords = Vec(pg.mouse.get_pos())
 				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
@@ -2019,13 +2076,11 @@ class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
-		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: field.change_health(amount=1, player=self.owner)])
-		mountain_card_prototype = Card(name="Mountain", cost=0, passive_fns=[lambda self, field: field.board.add_mana(amount=1, type='red', cell=self.cell, distance=1)])
+		potion_card_prototype = Card(name="Potion", cost=1, begin_phase_fns=[lambda self, field: field.change_health(amount=1, player=self.owner, sync=True)])
 		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, base_max_health=2)
 		morale_card_prototype = Card(name="Morale", cost=2, passive_fns=[lambda self, field: field.board.buff_creatures_in_range(power=1,max_health=1,cell=self.cell,distance=2)])
 
 		self.card_pool.add_card(potion_card_prototype)
-		self.card_pool.add_card(mountain_card_prototype)
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(morale_card_prototype)
 
@@ -2442,19 +2497,52 @@ class Board:
 		self.cards = np.full(size, None, np.dtype(Card))
 		grid_origin = (screen_size[0]//2-int((size[0]*node_size[0])//2), screen_size[1]//2-int((size[1]*node_size[1])//2))
 		self.grid = Grid(dimensions=size, origin=grid_origin, cell_size=node_size)
-		self._reset_mana()
 
-	def place_card(self, cell, card):
-		if self.grid.check_cell_valid(cell) == True:
+	def __getitem__(self, key):
+		if len(key) == 2:
+			return self.cards[key[0],key[1]]
+
+	@property
+	def lane_count(self):
+		return self.size[0]
+
+	@property
+	def rank_count(self):
+		return self.size[1]
+	
+	
+
+	def place_card(self, cell, card, owner, sync):
+		if self.grid.check_cell_valid(cell) == True and card != None:
 			card.cell = cell
-			card.owner = self.grid.get_cell_owner(cell)
+			card.owner = owner
 			self.cards[cell] = card
 			self._refresh_passives()
 
+			if sync == True:
+				send_string = 'card placed;' + card.name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';' + str(owner) + ';[END]'
+				self.field.game.queue_network_data(send_string.encode('utf-8'))
+
 			return True # Successfully fulfilled requirements for placing the card and placed it.
 		else:
-			print("Tried to place card in invalid cell")
+			print("Tried to place card in invalid cell or tried to place None card")
 			return False
+
+	def delete_card_from_board(self, cell, sync):
+		print("deleting card: ", self.cards[cell])
+		if self.cards[cell] != None:
+			self.cards[cell] = None
+			self._refresh_passives()
+
+			if sync == True:
+				send_string = 'card deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
+				self.field.game.queue_network_data(send_string.encode('utf-8'))
+
+	def move_card(self, start_cell, target_cell, sync):
+		if self[target_cell] == None:
+			card=self[start_cell]
+			self.place_card(cell=target_cell, card=card, owner=card.owner, sync=sync)
+			self.delete_card_from_board(start_cell, sync=sync)
 
 	def return_card_to_hand(self, cell):
 		if self.cards[cell] != None:
@@ -2466,47 +2554,29 @@ class Board:
 
 			return card_name
 
-	def remove_card_from_board(self, cell):
-		if self.cards[cell] != None:
-			self.cards[cell].owner = None
-			self.cards[cell] = None
-			self._refresh_passives()
+	# def get_frontmost_occupied_cell(self, player, lane):
+	# 	ranks = range(self.)
+	# 	if player == 0:
+	# 		ranks = range(3,6,1) #3,4,5
+	# 	elif player == 1:
+	# 		ranks = range(2,-1,-1) #2,1,0
+	# 	else:
+	# 		print("get_frontmost_occupied_cell got invalid player")
+	# 		return {'error:': True}
 
-	def get_frontmost_occupied_cell(self, player, lane):
-		ranks = []
-		if player == 0:
-			ranks = range(3,6,1) #3,4,5
-		elif player == 1:
-			ranks = range(2,-1,-1) #2,1,0
-		else:
-			print("get_frontmost_occupied_cell got invalid player")
-			return {'error:': True}
+	# 	for rank in ranks:
+	# 		if self.cards[lane, rank] != None:
+	# 			return {'error': False,
+	# 					'cell': (lane, rank)}
 
-		for rank in ranks:
-			if self.cards[lane, rank] != None:
-				return {'error': False,
-						'cell': (lane, rank)}
-
-		return {'error': False,
-				'cell': None} # There are no cards in the lane
+	# 	return {'error': False,
+	# 			'cell': None} # There are no cards in the lane
 
 
-	def _reset_mana(self):
-		self.red_mana = np.zeros(self.size, dtype=np.uint8)
 
 	def _refresh_passives(self):
 		dirty = False
 
-		for cell, card in np.ndenumerate(self.cards):
-			if card != None:
-				if self.red_mana[cell] >= card.cost and card.active != True:
-					dirty = True
-					card.active = True
-				elif self.red_mana[cell] < card.cost and card.active != False:
-					dirty = True
-					card.active = False
-
-		self._reset_mana()
 		self._clear_buffs()
 		self.do_passive()
 
@@ -2519,12 +2589,6 @@ class Board:
 			if card != None:
 				card.clear_buffs()
 
-	def add_mana(self, amount, type, cell, distance=1):
-		if cell:
-			if type == "red":
-				cell_coords = self.grid.get_cells_by_distance(start_cell=cell, distance=distance)
-				for cell_coord in cell_coords:
-					self.red_mana[cell_coord] += amount
 
 	def buff_creatures_in_range(self, power, max_health, cell, distance=1):
 		if cell:
@@ -2543,53 +2607,6 @@ class Board:
 			if card != None:
 				card.do_begin_phase(self.field)
 
-	def do_attack_phase(self):
-		for _, card in np.ndenumerate(self.cards):
-			if card != None:
-				card.do_attack_phase(self.field)
-
-		for lane in range(self.size[0]): # 0,1,...,4
-			front0_cell = self.get_frontmost_occupied_cell(0, lane)['cell']
-			front1_cell = self.get_frontmost_occupied_cell(1, lane)['cell']
-
-			card_0 = None
-			card_1 = None
-
-			if front0_cell:
-				card_0 = self.cards[front0_cell]
-			if front1_cell:
-				card_1 = self.cards[front1_cell]
-
-			is_creature_0 = isinstance(card_0, CreatureCard)
-			is_creature_1 = isinstance(card_1, CreatureCard)
-
-			if is_creature_0 and is_creature_1:
-				if card_0.active:
-					card_1.change_health(-card_0.power)
-				if card_1.active:
-					card_0.change_health(-card_1.power)
-
-				if card_0.health <= 0:
-					self.remove_card_from_board(front0_cell)
-				if card_1.health <= 0:
-					self.remove_card_from_board(front1_cell)
-
-			if is_creature_0 and not is_creature_1:
-				if card_0.active:
-					if card_1:
-						self.remove_card_from_board(front1_cell)
-					else:
-						self.field.change_health(-card_0.power, 1)
-			if is_creature_1 and not is_creature_0:
-				if card_1.active:
-					if card_0:
-						self.remove_card_from_board(front0_cell)
-					else:
-						self.field.change_health(-card_1.power, 0)
-
-			if not is_creature_0 and not is_creature_1:
-				pass
-
 	def draw(self, player_perspective=0):
 		self.grid.draw(grey, player_perspective=player_perspective)
 
@@ -2604,20 +2621,11 @@ class Board:
 					card_pos[0] -= board_card_size[0]//2
 					card.draw(card_pos, 'board')
 
-		# (Old) Drawing the mana text number in each cell
-		for i, mana in np.ndenumerate(self.red_mana):
-			mana_surface = count_font.render(str(mana), True, red)
-			if self.field.player_number == 0:
-				cell = i
-			else:
-				cell = (i[0],self.grid.dimensions[1]-1-i[1])
-			self.grid.draw_surface_in_cell(mana_surface, cell, align=('right', 'down'), offset=(-2,-2))
-
 try:
 	if sys.argv[2] == 'l':
-		os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,50)
+		os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10,30)
 	elif sys.argv[2] == 'r':
-		os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (700,50)
+		os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (700,30)
 except:
 	pass
 
