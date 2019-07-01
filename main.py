@@ -165,9 +165,6 @@ class Grid:
 				x_range = range(start_cell[0] - distance, start_cell[0]+1)
 				y_range = [start_cell[1]]
 
-			print('dir=', direction, '; distance=', distance)
-			print('x_range=', list(x_range), '; y_range=', list(y_range))
-			print('***')
 			cells += [(x,y) for x in x_range for y in y_range if self.check_cell_valid(cell=(x,y)) == True]
 
 		return list(set(cells)) # Remove duplicate cells
@@ -475,14 +472,12 @@ class Card:
 		if len(self.visibility) == 1:
 			distance = self.visibility[0]
 			distance_dict = {direction:distance for direction in ('up','right','down','left')}
-			print(distance_dict)
 			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
 															distances=distance_dict)
 		elif len(self.visibility) == 4:
 			directions = ['up','right','down','left']
 			distances = self.visibility
 			distance_dict = dict(zip(directions, distances))
-			print(distance_dict)
 			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
 															distances=distance_dict)
 		else:
@@ -3036,7 +3031,7 @@ class Board:
 			# Draw the green highlight around border of selected cell
 			pg.draw.rect(screen, green, self.grid.get_cell_rect(self.selected_cell), 1)
 
-		fow_surface = pg.Surface(self.grid.rect.size)
+		fow_surface = pg.Surface((self.grid.rect.width+1, self.grid.rect.height+1))
 		fow_surface.fill(black)
 		fow_surface.set_alpha(200)
 		# We'll draw pink squares on top of visible squares to remove the FOW
@@ -3052,7 +3047,7 @@ class Board:
 
 		fow_visible_cells = list(set(fow_visible_cells))
 
-		transparent_cell = pg.Surface(self.grid.cell_size)
+		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
 		transparent_cell.fill(pink)
 		for cell in fow_visible_cells:
 			if player_perspective == 1:
