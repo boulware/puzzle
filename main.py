@@ -2428,7 +2428,7 @@ class Game:
 		self.card_pool = CardPool()
 
 		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, max_health=2, visibility=[1])
-		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,2,1,0])
+		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,0,0,0])
 		drone_card_prototype = BuilderCard(name="Drone", cost=1, base_power=0, max_health=1, visibility=[1])
 		blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4, visibility=[0])
 
@@ -3042,7 +3042,10 @@ class Board:
 		# We'll draw pink squares on top of visible squares to remove the FOW
 		fow_surface.set_colorkey(pink)
 
-		fow_visible_cells = []
+		if player_perspective == 0:
+			fow_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-2,self.size[1])]
+		else:
+			fow_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(0,2)]
 		for card in self:
 			if card != None and card.owner == player_perspective:
 				fow_visible_cells += card.visible_cells()
