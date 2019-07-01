@@ -145,6 +145,33 @@ class Grid:
 	# 	if cell [1] >= 3 and cell[1] <= 5:
 	# 		return 0
 
+	# distances format: {'up': 1, 'right': 2, ...}
+	def get_cells_in_directions(self, start_cell, distances):
+		cells = []
+		if self.check_cell_valid(cell=start_cell) == False: return cells
+
+		for direction, distance in distances.items():
+			distance = max(0, distance)
+			if direction == 'up':
+				x_range = [start_cell[0]]
+				y_range = range(start_cell[1] - distance, start_cell[1]+1)
+			elif direction == 'right':
+				x_range = range(start_cell[0], start_cell[0] + (distance+1))
+				y_range = [start_cell[1]]
+			elif direction == 'down':
+				x_range = [start_cell[0]]
+				y_range = range(start_cell[1], start_cell[1] + (distance+1))
+			elif direction == 'left':
+				x_range = range(start_cell[0] - distance, start_cell[0]+1)
+				y_range = [start_cell[1]]
+
+			print('dir=', direction, '; distance=', distance)
+			print('x_range=', list(x_range), '; y_range=', list(y_range))
+			print('***')
+			cells += [(x,y) for x in x_range for y in y_range if self.check_cell_valid(cell=(x,y)) == True]
+
+		return list(set(cells)) # Remove duplicate cells
+
 	def get_cells_by_distance(self, start_cell, distance): # Using Chebyshev distance (King's distance)
 		distance = max(0, distance) # Clamp distance to a non-negative value
 
@@ -223,8 +250,9 @@ class Grid:
 
 	def _generate_surface(self):
 		self.surface = pg.Surface((self.rect.size[0]+1, self.rect.size[1]+1))
-		pg.draw.rect(self.surface, very_dark_blue, ((0,0), (self.rect.width, self.rect.height//2)))
-		pg.draw.rect(self.surface, very_dark_red, ((0,self.rect.height//2),(self.rect.width,self.rect.height//2)))
+		pg.draw.rect(self.surface, dark_green, ((0,0), self.rect.size))
+		# pg.draw.rect(self.surface, very_dark_blue, ((0,0), (self.rect.width, self.rect.height//2)))
+		# pg.draw.rect(self.surface, very_dark_red, ((0,self.rect.height//2),(self.rect.width,self.rect.height//2)))
 
 		grid_color = white
 
@@ -401,10 +429,10 @@ class HealthComponent:
 		screen.blit(self.health_bar.surface, pos)
 
 class Card:
-	def __init__(self, name, cost):
+	def __init__(self, name, cost, visibility):
 		self.name = name
 		self.cost = cost
-		self._board = None
+		self.board = None
 		self.cell = None
 		self._owner = None
 
@@ -420,6 +448,18 @@ class Card:
 		self._health_component = None
 		self._attack_component = None
 
+		# Number of values in visibility
+		# 1 value -> the unit sees that value in all (cardinal?) directions
+		# 4 values-> the unit sees in each cardinal direction those 4 values.
+		#			First value is in their face direction, second is clockwise from there, etc.
+		# Anything else is invalid (for now; I might add 8-directions later)
+		vis_dirs = len(visibility)
+		if vis_dirs != 1 and vis_dirs != 4:
+			print('invalid visibility given to Card(). Using default vis=[1]')
+			self.visibility = [1]
+		else:
+			self.visibility = visibility
+
 		# The "sub"-board upon which this card should be placed (unit, building, etc.)
 		self.sub_board = None
 
@@ -428,6 +468,27 @@ class Card:
 		
 		print(self.actions)
 		self.actions[self.current_action]()
+
+	def visible_cells(self):
+		if self.cell == None: return []
+
+		if len(self.visibility) == 1:
+			distance = self.visibility[0]
+			distance_dict = {direction:distance for direction in ('up','right','down','left')}
+			print(distance_dict)
+			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
+															distances=distance_dict)
+		elif len(self.visibility) == 4:
+			directions = ['up','right','down','left']
+			distances = self.visibility
+			distance_dict = dict(zip(directions, distances))
+			print(distance_dict)
+			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
+															distances=distance_dict)
+		else:
+			cells = [self.pos]
+
+		return cells
 
 	@property
 	def health(self):
@@ -553,8 +614,8 @@ class Card:
 			screen.blit(self.board_surface, pos)
 
 class BuildingCard(Card):
-	def __init__(self, name, cost, max_health, health=None, enter_fns=[]):
-		Card.__init__(self=self, name=name, cost=cost)
+	def __init__(self, name, cost, max_health, visibility, health=None, enter_fns=[]):
+		Card.__init__(self=self, name=name, cost=cost, visibility=visibility)
 
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 		self.enter_fns = enter_fns
@@ -604,11 +665,12 @@ class BuildingCard(Card):
 							cost = self.cost,
 							max_health = self.max_health,
 							health = self.health,
+							visibility = self.visibility,
 							enter_fns = self.enter_fns)
 
 class CreatureCard(Card):
-	def __init__(self, name, cost, base_power, max_health, health=None):
-		Card.__init__(self=self, name=name, cost=cost)
+	def __init__(self, name, cost, base_power, max_health, visibility, health=None):
+		Card.__init__(self=self, name=name, visibility=visibility, cost=cost)
 
 		self.actions.update({'F': self.advance_card})
 		self.current_action = 'F'
@@ -641,7 +703,6 @@ class CreatureCard(Card):
 		if value == None:
 			self.sub_board = None
 		else:
-			print(self.name, '.board changed to ', value)
 			self._board = value
 			self.sub_board = self._board.unit_cards
 
@@ -696,12 +757,15 @@ class CreatureCard(Card):
 							cost = self.cost,
 							base_power = self.base_power,
 							max_health = self.max_health,
-							health = self.health)
+							health = self.health,
+							visibility = self.visibility)
 
 # TODO: Make building a component rather than a subclass
 class BuilderCard(CreatureCard):
-	def __init__(self, name, cost, base_power, max_health, health=None):
-		CreatureCard.__init__(self=self, name=name, cost=cost, base_power=base_power, max_health=max_health, health=health)
+	def __init__(self, name, cost, base_power, max_health, visibility, health=None):
+		CreatureCard.__init__(	self=self, name=name, cost=cost,
+								base_power=base_power, max_health=max_health, 
+								visibility=visibility, health=health)
 
 		self.actions.update({'MB': self.move_build})
 		self.current_action = 'MB'
@@ -748,6 +812,7 @@ class BuilderCard(CreatureCard):
 							cost = self.cost,
 							base_power = self.base_power,
 							max_health = self.max_health,
+							visibility = self.visibility,
 							health = self.health)
 
 class CardPool:
@@ -2362,10 +2427,10 @@ class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
-		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, max_health=2)
-		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1)
-		drone_card_prototype = BuilderCard(name="Drone", cost=1, base_power=0, max_health=1)
-		blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4)
+		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, max_health=2, visibility=[1])
+		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,2,1,0])
+		drone_card_prototype = BuilderCard(name="Drone", cost=1, base_power=0, max_health=1, visibility=[1])
+		blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4, visibility=[0])
 
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(elf_card_prototype)
@@ -2789,6 +2854,9 @@ class Board:
 		player_count = 2
 		self.queued_cards = [[None]*grid_count[0] for i in range(player_count)]
 
+	def __iter__(self):
+		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self.unit_cards)])
+
 	@property
 	def lane_count(self):
 		return self.size[0]
@@ -2963,23 +3031,51 @@ class Board:
 
 	def draw(self, player_perspective=0):
 		self.grid.draw(grey, player_perspective=player_perspective)
+
 		if self.selected_cell != None:
+			# Draw the green highlight around border of selected cell
 			pg.draw.rect(screen, green, self.grid.get_cell_rect(self.selected_cell), 1)
 
+		fow_surface = pg.Surface(self.grid.rect.size)
+		fow_surface.fill(black)
+		fow_surface.set_alpha(200)
+		# We'll draw pink squares on top of visible squares to remove the FOW
+		fow_surface.set_colorkey(pink)
+
+		fow_visible_cells = []
+		for card in self:
+			if card != None and card.owner == player_perspective:
+				fow_visible_cells += card.visible_cells()
+
+		fow_visible_cells = list(set(fow_visible_cells))
+
+		transparent_cell = pg.Surface(self.grid.cell_size)
+		transparent_cell.fill(pink)
+		for cell in fow_visible_cells:
+			if player_perspective == 1:
+				# Adjusted for player perspective
+				relative_cell = (cell[0], self.size[1] - 1 - cell[1])
+			else:
+				relative_cell = cell
+
+			cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
+			cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
+			draw_surface_aligned(target=fow_surface, source=transparent_cell, pos=cell_pos, align=('center','center'))
+
+		screen.blit(fow_surface, self.grid.origin)
 
 		# Draw the cards in the board
 		# For each type of card (unit, building, ...) loop through all cells and draw the card
 		# (Draw unit cards on top of building cards)
-		for card_group in (self.building_cards, self.unit_cards):
-			for x in range(self.size[0]):
-				for y in range(self.size[1]):
-					card = card_group[x][y]
-					if card != None:
-						if player_perspective == 1:
-							y = self.size[1] - 1 - y
-						card_pos = self.grid.get_cell_pos((x,y), align=('center','top'))
-						card_pos[0] -= board_card_size[0]//2
-						card.draw(card_pos, 'board')
+		for card in self:
+			if card != None:
+				if card.cell in fow_visible_cells:
+					cell_x, cell_y = card.cell
+					if player_perspective == 1:
+						cell_y = self.size[1] - 1 - cell_y
+					card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('center','top'))
+					card_pos[0] -= board_card_size[0]//2
+					card.draw(card_pos, 'board')
 
 
 try:
