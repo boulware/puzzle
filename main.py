@@ -8,6 +8,18 @@ from pygame.math import Vector2 as Vec
 import numpy as np
 from functools import partial
 
+# Some naming conventions used throughout the codebase:
+# 
+# pos vs. cell
+# pos (x,y) -- references a point/pixel in windowspace (relative to the topleft corner of the window, or otherwise);
+#			; NEVER references the position of a cell within a grid
+# cell (x,y) -- references a cell within a grid; (0,0) is the top left cell, (1,0) is the one directly right of it, etc.
+#
+# As often as possible, I try to stick to the following naming convention:
+# functions/methods and variables (member and non-member) are all lowercase, words separated by underscore: get_position(), do(), ...
+# classes/types are uppercased words, unseparated: CreatureCard, Card, ...
+# capitization exceptions: acronyms/initialisms will be all uppercase
+
 # General constants
 black = (0,0,0)
 grey = (127,127,127)
@@ -33,8 +45,8 @@ pink = (255,200,200)
 # Game parameters
 grid_count = (4,4)
 node_size = (90,90)
-action_panel_size = (100,100)
-action_icon_size = (20,20)
+action_panel_size = (120,120)
+action_icon_size = (40,40)
 grid_origin = (100,10)
 
 class Node: 
@@ -95,10 +107,18 @@ class GameGrid:
 class Grid:
 	def __init__(self, dimensions, origin, cell_size):
 		self.dimensions = np.array(dimensions)
-		self.rect = pg.Rect(origin, [(dimensions[x_n] * cell_size[x_n]) for x_n in range(2)])
+		self.origin = origin
 		self.cell_size = cell_size
 		self.update_drawable()
 		self._generate_surface()
+
+	@property
+	def rect(self):
+		return pg.Rect(self.origin, [(self.dimensions[x_n] * self.cell_size[x_n]) for x_n in range(2)])
+
+	def get_cell_rect(self, cell):
+		pos = self.get_cell_pos(cell=cell)
+		return pg.Rect(pos, (self.cell_size[0]+1, self.cell_size[1]+1))
 
 	def update_drawable(self):
 		self.drawable = True
@@ -173,31 +193,33 @@ class Grid:
 
 		return pos
 
-	def get_lane_at_pos(self, pos=None):
-		if pos == None:
-			pos = pg.mouse.get_pos()
+	# def get_lane_at_pos(self, pos):
+	# 	hit = False
+	# 	cell_x = (pos[0] - self.rect.x) // self.cell_size[0]
+	# 	cell_y = (pos[1] - self.rect.y) // self.cell_size[1]
+
+	# 	if cell_x >= 0 and cell_x < self.dimensions[0] and cell_y >= 0 and cell_y < self.dimensions[1]:
+	# 		hit = True
+
+	# 	if hit == True:
+	# 		return (cell_x, cell_y)
+	# 	else:
+	# 		return None
+
+	def get_cell_at_pos(self, pos):
 		hit = False
-		cell_x = (pos[0] - self.rect.x) // self.cell_size[0]
-		cell_y = (pos[1] - self.rect.y) // self.cell_size[1]
+		x, y = pos
 
-		if cell_x >= 0 and cell_x < self.dimensions[0] and cell_y >= 0 and cell_y < self.dimensions[1]:
-			hit = True
-
-		return {'hit': hit, 'cell': (cell_x, cell_y)}
-
-	def get_cell_at_mouse(self, mouse_pos=None):
-		hit = False
-		if mouse_pos == None:
-			mouse_pos = pg.mouse.get_pos()
-		mouse_x, mouse_y = mouse_pos
-
-		grid_x = (mouse_x - self.rect.x) // self.cell_size[0]
-		grid_y = (mouse_y - self.rect.y) // self.cell_size[1]
+		grid_x = (x - self.rect.x) // self.cell_size[0]
+		grid_y = (y - self.rect.y) // self.cell_size[1]
 
 		if grid_x >=0 and grid_x < self.dimensions[0] and grid_y >= 0 and grid_y < self.dimensions[1]:
 			hit = True
 
-		return {'hit': hit, 'cell': (grid_x, grid_y)}
+		if hit == True:
+			return (grid_x, grid_y)
+		else:
+			return None
 
 	def _generate_surface(self):
 		self.surface = pg.Surface((self.rect.size[0]+1, self.rect.size[1]+1))
@@ -382,11 +404,12 @@ class Card:
 	def __init__(self, name, cost):
 		self.name = name
 		self.cost = cost
+		self._board = None
 		self.cell = None
 		self._owner = None
 
-		self.buffs = []
-		self.actions = ['^', 'v', 'o']
+		self.actions = {}
+		self.current_action = None
 
 		self.dirty = True
 
@@ -396,6 +419,15 @@ class Card:
 
 		self._health_component = None
 		self._attack_component = None
+
+		# The "sub"-board upon which this card should be placed (unit, building, etc.)
+		self.sub_board = None
+
+	def act(self):
+		if self.current_action == None: return
+		
+		print(self.actions)
+		self.actions[self.current_action]()
 
 	@property
 	def health(self):
@@ -417,7 +449,25 @@ class Card:
 	def max_health(self):
 		if self._health_component != None:
 			return self._health_component.max_health
-	
+
+	def move_to_hand(self, hand):
+		if isinstance(self.sub_board, np.ndarray) == False:
+			print('sub_board not set')
+			print_callstack()
+			return
+
+		if self.board == True:
+			# This should always be False, but check just in case
+			if self != self.sub_board[self.pos]:
+				print('something about board/pos state in card is wrong')
+				return
+
+			self.sub_board[self.pos] = None
+			# These don't really matter atm because hand.add_card() pulls a copy from card pool, but futureproofing
+			self.board = None
+			self.pos = None
+
+		hand.add_card(name=self.name)
 
 	@property
 	def hand_surface(self):
@@ -434,39 +484,6 @@ class Card:
 			self.generate_surfaces()
 
 		return self._board_surface
-
-	@property
-	def action_panel_surface(self):
-		if self._action_panel_surface == None:
-			self._generate_action_panel_surface()
-
-		return self._action_panel_surface
-	
-
-	def _generate_action_panel_surface(self):
-		self._action_panel_surface = pg.Surface(action_panel_size)
-
-		self.action_panel_surface.fill(black)
-
-		icon_width, icon_height = action_icon_size
-		panel_width, panel_height = action_panel_size
-		panel_count_x = panel_width // icon_width
-		panel_count_y = panel_height // icon_height
-		for i, action in enumerate(self.actions):
-			row = i // panel_count_x
-			col = i % panel_count_y
-
-			cell_pos = (col*icon_width, row*icon_height)
-			pg.draw.rect(self.action_panel_surface, dark_grey, (cell_pos, action_icon_size))
-			pg.draw.rect(self.action_panel_surface, light_grey, (cell_pos, action_icon_size), 1)
-			draw_surface_aligned(	target=self.action_panel_surface,
-									source=action_font.render(action, True, white),
-									pos=(cell_pos[0]+icon_width//2, cell_pos[1]+icon_height//2),
-									align=('center','center'))
-
-		pg.draw.rect(self.action_panel_surface, white, ((0,0), action_panel_size), 1)
-
-
 
 	def _generate_hand_surface(self):
 		bg_color = dark_grey
@@ -518,8 +535,7 @@ class Card:
 		self.generate_surfaces()
 
 	def clone(self):
-		return Card(name = self.name,
-					cost = self.cost)
+		raise NotImplementedError()
 
 	def apply_buff(self):
 		pass
@@ -529,37 +545,109 @@ class Card:
 		self.dirty = True
 
 	def draw(self, pos, location, hover=False):
-		if location == "hand":
+		if location == 'hand':
 			screen.blit(self.hand_surface, pos)
 			if hover:
 				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
-		if location == "board" or location == "board_hover":
-			screen.blit(self.action_panel_surface, (pos[0] + 100, pos[1]+5))
+		elif location == 'board' or location == 'board_hover':
 			screen.blit(self.board_surface, pos)
 
-
 class BuildingCard(Card):
-	def __init__(self, name, cost, max_health, enter_fns=[]):
+	def __init__(self, name, cost, max_health, health=None, enter_fns=[]):
 		Card.__init__(self=self, name=name, cost=cost)
-		print('building')
+
+		self._health_component = HealthComponent(max_health=max_health, health=health)
+		self.enter_fns = enter_fns
+
+		self.pending = False
+
+	@property
+	def board(self):
+		return self._board
+
+	@board.setter
+	def board(self, value):
+		if value == None:
+			self.sub_board = None
+		else:
+			self._board = value
+			self.sub_board = self._board.building_cards
+
+	@property
+	def pending(self):
+		return self._pending
+
+	@pending.setter
+	def pending(self, value):
+		self._pending = value
+		self._generate_board_surface()
+
+	def _generate_board_surface(self):
+		Card._generate_board_surface(self)
+
+		if self.pending == True:
+			pending_text_surface = card_text_v_sm.render('Pending', True, green)
+			pending_surface = pg.Surface((self._board_surface.get_width(), pending_text_surface.get_height()))
+			pending_surface.blit(pending_text_surface, (pending_surface.get_rect().centerx - pending_text_surface.get_width()//2,0))
+
+			pg.draw.rect(pending_surface, green, pending_surface.get_rect(), 1)
+
+			# a surface that fades out the normal parts of the card while it is pending
+			black_out_surface = pg.Surface(self._board_surface.get_size())
+			black_out_surface.set_alpha(120)
+
+			self._board_surface.blit(black_out_surface, (0,0))
+			self._board_surface.blit(pending_surface, (0,self._board_surface.get_height()//2 - pending_surface.get_height()//2))
+
+	def clone(self):
+		return BuildingCard(name = self.name,
+							cost = self.cost,
+							max_health = self.max_health,
+							health = self.health,
+							enter_fns = self.enter_fns)
 
 class CreatureCard(Card):
 	def __init__(self, name, cost, base_power, max_health, health=None):
 		Card.__init__(self=self, name=name, cost=cost)
 
-		self.health_bar = HealthBar(max_health, (15,100))
+		self.actions.update({'F': self.advance_card})
+		self.current_action = 'F'
 
 		self.base_power = base_power
-		# self._base_max_health = base_max_health
-		# self.health = base_max_health
 		self._health_component = HealthComponent(max_health=max_health, health=health)
+
+		# Which "sub"-board this card should be placed on (unit, building, etc.)
+		self.sub_board = None
+		self.queue_lane = None
+
+	def advance_card(self):
+		if self.cell == None: return
+
+		if self.owner == 0:
+			target_cell = (self.cell[0], self.cell[1]-1)
+		else:
+			target_cell = (self.cell[0], self.cell[1]+1)
+
+		print(target_cell)
+
+		self.board.move_unit(start_cell=self.cell, target_cell=target_cell, sync=True)
+
+	@property
+	def board(self):
+		return self._board
+
+	@board.setter
+	def board(self, value):
+		if value == None:
+			self.sub_board = None
+		else:
+			print(self.name, '.board changed to ', value)
+			self._board = value
+			self.sub_board = self._board.unit_cards
 
 	@property
 	def power(self):
 		return self.base_power
-
-	def move(self):
-		pass
 
 	def _generate_hand_surface(self):
 		Card._generate_hand_surface(self)
@@ -589,20 +677,73 @@ class CreatureCard(Card):
 		self._generate_board_surface()
 
 	def apply_buff(self, power=0, max_health=0):
-		buff = (power,max_health)
-		if buff != (0,0):
-			self.dirty = True
-			self.buffs.append(buff)
-			self.health_bar.max_health = self.max_health
+		pass
+		# buff = (power,max_health)
+		# if buff != (0,0):
+		# 	self.dirty = True
+		# 	self.buffs.append(buff)
+		# 	self.health_bar.max_health = self.max_health
 
 	def clear_buffs(self):
-		Card.clear_buffs(self)
-		self.health_bar.max_health = self.max_health
+		pass
+		# Card.clear_buffs(self)
+		# self.health_bar.max_health = self.max_health
 		# if board.check_if_card_is_front(self.cell) == True:
 		# 	game.change_health(-self.power, self.enemy)
 
 	def clone(self):
 		return CreatureCard(name = self.name,
+							cost = self.cost,
+							base_power = self.base_power,
+							max_health = self.max_health,
+							health = self.health)
+
+# TODO: Make building a component rather than a subclass
+class BuilderCard(CreatureCard):
+	def __init__(self, name, cost, base_power, max_health, health=None):
+		CreatureCard.__init__(self=self, name=name, cost=cost, base_power=base_power, max_health=max_health, health=health)
+
+		self.actions.update({'MB': self.move_build})
+		self.current_action = 'MB'
+
+		self.base_power = base_power
+		self._health_component = HealthComponent(max_health=max_health, health=health)
+
+		self.target_building = None
+
+	def move_build(self):
+		if self.cell == None: return
+
+		if self.cell == self.target_building.cell:
+			self.build()
+		else:
+			self.advance_card()
+
+	def build(self):
+		self.sub_board[self.cell] = None
+		self.target_building.pending = False
+
+
+	def move_to_hand(self, hand):
+		if self.sub_board == None:
+			print('sub_board not set')
+			return
+
+		if self.board == True:
+			# This should always be False, but check just in case
+			if self != self.sub_board[self.pos]:
+				print('something about board/pos state in card is wrong')
+				return
+
+			self.sub_board[self.pos] = None
+			# These don't really matter atm because hand.add_card() pulls a copy from card pool, but futureproofing
+			self.board = None
+			self.pos = None
+
+			# Builder card should just be deleted, and not returned to hand
+
+	def clone(self):
+		return BuilderCard(	name = self.name,
 							cost = self.cost,
 							base_power = self.base_power,
 							max_health = self.max_health,
@@ -1736,7 +1877,8 @@ class Field(GameState):
 
 		for _, hand in enumerate(self.hands):
 			hand.add_card("Goblin", 1)
-			hand.add_card("Drone", 3)
+			hand.add_card('Elf', 2)
+			hand.add_card("Blacksmith", 1)
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 
@@ -1744,7 +1886,7 @@ class Field(GameState):
 		self.hand_area_height = 80
 
 
-		self.phase = Phase(['Build','Move'])
+		self.phase = Phase(['Build','Act'])
 		self.turn_display = TurnDisplay(self.phase, ui_font)
 
 		self.hand_origin = Vec(self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50)))
@@ -1755,7 +1897,6 @@ class Field(GameState):
 
 
 		self.player_count = 2
-		self.queued_cards = [[None]*grid_count[0] for i in range(self.player_count)]
 
 		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
 									align=('right','up'),
@@ -1826,6 +1967,11 @@ class Field(GameState):
 		if self.game_type == 'SP' or self.is_current_player_active():
 			self._advance_turn(sync=True)
 
+	@property
+	def action_panel_rect(self):
+		pos = self.board.grid.get_grid_pos(align=('right','center'), offset=(50, -action_panel_size[1]//2))
+		return pg.Rect(pos, action_panel_size)
+	
 
 	def left_mouse_pressed(self, mouse_pos):
 		if self.hand_rect.collidepoint(mouse_pos): # mouse is hovering hand
@@ -1839,26 +1985,56 @@ class Field(GameState):
 					self.drag_card = self.active_hand.pop_card(clicked_card_index)
 					self.card_grab_point = (relative_x,relative_y)
 
+		if self.board.grid.rect.collidepoint(mouse_pos): # mouse is hovering board
+			self.board.selected_cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+		else:
+			self.board.selected_cell = None
+
 	def is_current_player_active(self):
 		if self.player_turn == self.player_number:
 			return True
 		else:
 			return False
 
+	# def queue_card(self, card, lane):
+	# 	# queue of the active player
+	# 	active_queue = self.queued_cards[self.player_number]
+	# 	previous_card = active_queue[lane] # Card in the lane queue already
+
+	# 	if previous_card != None:
+	# 		if isinstance(previous_card, BuilderCard):
+	# 			if previous_card.target_building != None:
+	# 				previous_card.target_building.move_to_hand(hand=self.active_hand)
+	# 				# Builder card doesn't get returned to hand, since they aren't actual 'cards',
+	# 				# but rather are spawned along with pending buildings
+
+	# 		# Return the currently queued card back to the hand, to be replaced with the queued card
+	# 		# Builder cards automatically get deleted in move_to_hand()
+	# 		previous_card.move_to_hand(hand=self.active_hand)
+
+	# 	active_queue[lane] = card
+	# 	card.queue_lane = lane
+
+
+
 	def left_mouse_released(self, mouse_pos):
 		if self.drag_card:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
 			if self.is_current_player_active() and self.phase.name == 'Build':
-				result = self.board.grid.get_lane_at_pos(pos=mouse_pos)
-				if result['hit'] == True and isinstance(self.drag_card, CreatureCard):
-					lane_number = result['cell'][0]
-					lane_card = self.queued_cards[self.player_number][lane_number]
-					if lane_card != None:
-						self.active_hand.add_card(name=lane_card.name)
-
-					self.queued_cards[self.player_number][lane_number] = self.drag_card
-					placed_in_board = True
+				if isinstance(self.drag_card, CreatureCard):
+					cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+					if cell != None:
+						self.board.queue_card(lane=cell[0], card=self.drag_card, player=self.player_number)
+						placed_in_board = True
+				elif isinstance(self.drag_card, BuildingCard):
+					cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+					if cell != None:
+						self.board.queue_building(cell=cell, building_card=self.drag_card, owner=self.player_number)
+						drone = self.game.card_pool.get_card_by_name(name='Drone')
+						drone.target_building = self.drag_card
+						self.board.queue_card(card=drone, lane=cell[0], player=self.player_number)
+						placed_in_board = True
 			
 			if placed_in_board == False:
 				self.active_hand.add_card(name=self.drag_card.name)
@@ -1875,14 +2051,13 @@ class Field(GameState):
 					self._end_turn(sync=True)
 	
 	def right_mouse_pressed(self, mouse_pos):
-		result = self.board.grid.get_cell_at_mouse(mouse_pos)
-		if result['hit'] == True:
-			cell = result['cell']
+		cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+		if cell != None:
 			card_name = self.board.return_card_to_hand(cell)
 			if card_name != None:
 				self.board._refresh_passives()
 
-				send_string = 'card removed;' + card_name + ';' + str(result['cell'][0]) + ';' + str(result['cell'][1]) + ';[END]' 
+				send_string = 'card removed;' + card_name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';[END]' 
 				self.game.queue_network_data(send_string.encode('utf-8'))
 
 	def set_active_player(self, player_number):
@@ -1901,35 +2076,38 @@ class Field(GameState):
 			end_of_turn = self._advance_turn(sync=sync)
 
 	def _advance_turn(self, sync):
-		if self.phase.name == "Move":
+		if self.phase.name == 'Act':
 			for lane in range(self.board.lane_count):
-				for rank in range(self.board.rank_count)[::-1]:
+				for rank in range(self.board.rank_count):
 					cell = (lane,rank) # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
 					if self.player_turn == 0:
-						absolute_cell = (cell[0], self.board.rank_count-1-cell[1]) # Corrected for player orientation (actual grid coords)
-					else:
 						absolute_cell = cell
+					else:
+						absolute_cell = (cell[0], self.board.rank_count-1-cell[1]) # Corrected for player orientation (actual grid coords)
+
 
 					card = self.board.unit_cards[absolute_cell]
-					if card != None and isinstance(card, CreatureCard):
-						if card != None and card.owner == self.player_turn:
-							if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
-									self.board.delete_unit_from_board(cell=absolute_cell, sync=sync)
-									self.change_health(amount=-card.power, player=card.enemy, sync=sync)
-							else:
-								target_cell = (cell[0], cell[1]+1)
-								if self.player_turn == 0:
-									absolute_target_cell = (target_cell[0], self.board.rank_count-1-target_cell[1]) # Corrected for player orientation (actual grid coords)
-								else:
-									absolute_target_cell = target_cell
+					if card != None and card.owner == self.player_turn:
+						card.act()
+					# if card != None and isinstance(card, CreatureCard):
+					# 	if card != None and card.owner == self.player_turn:
+					# 		if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
+					# 				self.board.delete_unit_from_board(cell=absolute_cell, sync=sync)
+					# 				self.change_health(amount=-card.power, player=card.enemy, sync=sync)
+					# 		else:
+					# 			target_cell = (cell[0], cell[1]+1)
+					# 			if self.player_turn == 0:
+					# 				absolute_target_cell = (target_cell[0], self.board.rank_count-1-target_cell[1]) # Corrected for player orientation (actual grid coords)
+					# 			else:
+					# 				absolute_target_cell = target_cell
 
-								if self.board.unit_cards[absolute_target_cell] == None:
-									self.board.move_unit(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
-								else:
-									self.board.fight_cards(attacker_cell=absolute_cell, defender_cell=absolute_target_cell, sync=sync)
+					# 			if self.board.unit_cards[absolute_target_cell] == None:
+					# 				self.board.move_unit(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
+					# 			else:
+					# 				self.board.fight_cards(attacker_cell=absolute_cell, defender_cell=absolute_target_cell, sync=sync)
 
 			# Transfer queued cards to battlefield in closest rank
-			for lane_number, queued_card in enumerate(self.queued_cards[self.player_turn]):
+			for lane_number, queued_card in enumerate(self.board.queued_cards[self.player_turn]):
 				if queued_card != None:
 					if self.player_turn == 0:
 						cell = (lane_number, self.board.size[1]-1)
@@ -1937,7 +2115,7 @@ class Field(GameState):
 						cell = (lane_number, 0)
 
 					self.board.place_card(cell=cell, card=queued_card, owner=self.player_turn, sync=sync)
-					self.queued_cards[self.player_number][lane_number] = None
+					self.board.queued_cards[self.player_number][lane_number] = None
 
 		if sync == True:
 			send_string = 'phase advanced' + ';[END]'
@@ -2014,6 +2192,36 @@ class Field(GameState):
 
 		self.hovered_card_index = None
 
+	def get_action_icon_pos(self, action_index):
+		row = i // pan
+
+	def _draw_action_panel(self):
+		action_panel_surface = pg.Surface(action_panel_size)
+		action_panel_surface.fill(black)
+
+		icon_width, icon_height = action_icon_size
+		panel_width, panel_height = action_panel_size
+		panel_count_x = panel_width // icon_width
+		panel_count_y = panel_height // icon_height
+
+		if self.board.selected_cell != None:
+			selected_card = self.board.unit_cards[self.board.selected_cell]
+			if selected_card != None:
+				for i, action in enumerate(selected_card.actions):
+					row = i // panel_count_x
+					col = i % panel_count_y
+
+					cell_pos = (col*icon_width, row*icon_height)
+					pg.draw.rect(action_panel_surface, dark_grey, (cell_pos, action_icon_size))
+					pg.draw.rect(action_panel_surface, light_grey, (cell_pos, action_icon_size), 1)
+					draw_surface_aligned(	target=action_panel_surface,
+											source=action_font.render(action, True, white),
+											pos=(cell_pos[0]+icon_width//2, cell_pos[1]+icon_height//2),
+											align=('center','center'))
+
+		pg.draw.rect(action_panel_surface, white, ((0,0),action_panel_size), 1)
+		screen.blit(action_panel_surface, self.action_panel_rect.topleft)
+
 	def update(self, dt, mouse_pos):
 		self._generate_hovered_card_index(mouse_pos)
 		# self.turn_button.update(dt, mouse_pos)
@@ -2034,11 +2242,16 @@ class Field(GameState):
 		# Draw board
 		self.board.draw(player_perspective=self.player_number)
 
-		for lane_number, queued_card in enumerate(self.queued_cards[self.player_number]):
+		# Draw queued cards
+		for lane_number, queued_card in enumerate(self.board.queued_cards[self.player_number]):
 			if queued_card != None:
 				pos = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('center','down'))
 				pos[0] -= board_card_size[0]//2
 				queued_card.draw(pos=pos, location='board')
+
+		self._draw_action_panel()
+
+		# pg.draw.rect(self.action_panel_surface, white, ((0,0), action_panel_size), 1)
 
 		# Calculate colors for card areas based on which player is active
 		if self.is_current_player_active():
@@ -2057,7 +2270,7 @@ class Field(GameState):
 						(0,screen_size[1]-self.hand_area_height),
 						(screen_size[0],screen_size[1]-self.hand_area_height)
 					)
-		# Draw other card area
+		# Draw enemy card area
 		pg.draw.rect(	screen, other_card_area_color,
 						((0,0), (screen_size[0], self.hand_area_height)))
 		pg.draw.line(	screen, lighten_color(other_card_area_color,0.5),
@@ -2097,7 +2310,7 @@ class Field(GameState):
 						15, 1)
 
 		# Draw turn display
-		self.turn_display.draw(pos=self.board.grid.get_grid_pos(align=('right','center'),offset=(50,0)))
+		self.turn_display.draw(pos=self.board.grid.get_grid_pos(align=('left','center'),offset=(-150,0)))
 
 		# Draw card being dragged
 		if self.drag_card:
@@ -2114,15 +2327,30 @@ class Field(GameState):
 			# 		cell_top_left[0] -= board_card_size[0]//2
 			# 		self.drag_card.draw(cell_top_left, "board_hover")
 			# 		drawn_in_board = True
-			
+
 			if self.is_current_player_active() and self.phase.name == 'Build':
-				result = self.board.grid.get_lane_at_pos()
-				if result['hit'] == True:
-					lane_number = result['cell'][0]
-					lane_down_center = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('center','down'))
-					lane_down_center[0] -= board_card_size[0]//2
-					self.drag_card.draw(lane_down_center, "board_hover")
-					drawn_in_board = True
+				if isinstance(self.drag_card, CreatureCard):
+					# TODO: Shouldn't be getting the mouse position in this way. Fetch it in update()
+					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos())
+					if cell != None:
+						lane = cell[0]
+						lane_down_center = self.board.grid.get_cell_pos(cell=(lane, self.board.size[1]-1), align=('center','down'))
+						lane_down_center[0] -= board_card_size[0]//2
+						self.drag_card.draw(pos=lane_down_center, location="board_hover")
+						drawn_in_board = True
+				elif isinstance(self.drag_card, BuildingCard):
+					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos())
+					if cell != None:
+						if self.player_number == 0:
+							pos = cell
+						elif self.player_number == 1:
+							pos = (cell[0],self.board.size[1]-1-cell[1])
+
+						if self.board.building_cards[pos] == None:
+							cell_top_center = self.board.grid.get_cell_pos(cell, align=('center','top'))
+							cell_top_center[0] -= board_card_size[0]//2
+							self.drag_card.draw(cell_top_center, "board_hover")
+							drawn_in_board = True
 
 			if drawn_in_board == False:
 				mouse_coords = Vec(pg.mouse.get_pos())
@@ -2134,12 +2362,14 @@ class Game:
 		self.card_pool = CardPool()
 
 		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, max_health=2)
-		drone_card_prototype = CreatureCard(name="Drone", cost=1, base_power=0, max_health=1)
-		# blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4)
+		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1)
+		drone_card_prototype = BuilderCard(name="Drone", cost=1, base_power=0, max_health=1)
+		blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4)
 
 		self.card_pool.add_card(goblin_card_prototype)
+		self.card_pool.add_card(elf_card_prototype)
 		self.card_pool.add_card(drone_card_prototype)
-		# self.card_pool.add_card(blacksmith_card_prototype)
+		self.card_pool.add_card(blacksmith_card_prototype)
 
 		self.network_data_queue = []
 
@@ -2554,9 +2784,9 @@ class Board:
 		grid_origin = (screen_size[0]//2-int((size[0]*node_size[0])//2), screen_size[1]//2-int((size[1]*node_size[1])//2))
 		self.grid = Grid(dimensions=size, origin=grid_origin, cell_size=node_size)
 
-	# def __getitem__(self, key):
-	# 	if len(key) == 2:
-	# 		return self.cards[key[0],key[1]]
+		self.selected_cell = None
+		player_count = 2
+		self.queued_cards = [[None]*grid_count[0] for i in range(player_count)]
 
 	@property
 	def lane_count(self):
@@ -2566,6 +2796,29 @@ class Board:
 	def rank_count(self):
 		return self.size[1]
 
+	def queue_card(self, card, lane, player):
+		# queue of the active player
+		active_queue = self.queued_cards[player]
+		previous_card = active_queue[lane] # Card in the lane queue already
+
+		if previous_card != None:
+			if isinstance(previous_card, BuilderCard):
+				if previous_card.target_building != None:
+					previous_card.target_building.move_to_hand(hand=self.field.active_hand)
+
+			# Return the currently queued card back to the hand, to be replaced with the queued card
+			# Builder cards automatically get deleted in move_to_hand()
+			previous_card.move_to_hand(hand=self.field.active_hand)
+
+		active_queue[lane] = card
+		card.board = self
+		card.owner = player
+		card.queue_lane = lane
+
+	def queue_building(self, cell, building_card, owner):
+		self.place_card(cell=cell, card=building_card, owner=owner, sync=False)
+		building_card.pending = True
+
 	def place_card(self, cell, card, owner, sync):
 		if self.grid.check_cell_valid(cell) == True and card != None:
 			if isinstance(card, BuildingCard):
@@ -2574,6 +2827,7 @@ class Board:
 				sub_board = self.unit_cards
 
 			card.cell = cell
+			card.board = self
 			card.owner = owner
 			sub_board[cell] = card
 
@@ -2603,8 +2857,9 @@ class Board:
 				self.field.game.queue_network_data(send_string.encode('utf-8'))
 
 	def move_unit(self, start_cell, target_cell, sync):
-		if self.unit_cards[target_cell] == None:
+		if self.grid.check_cell_valid(start_cell) == False or self.grid.check_cell_valid(target_cell) == False: return
 
+		if self.unit_cards[target_cell] == None:
 			card = self.unit_cards[start_cell]
 			self.place_card(cell=target_cell, card=card, owner=card.owner, sync=sync)
 			self.delete_unit_from_board(start_cell, sync=sync)
@@ -2623,6 +2878,7 @@ class Board:
 		if sync == True:
 			send_string = 'building moved;' + 	str(start_cell[0]) + ';' + str(start_cell[1]) + ';' + str(target_cell[0]) + ';' + str(target_cell[1]) + ';[END]'
 			self.field.game.queue_network_data(send_string.encode('utf-8'))		
+
 
 
 	def return_card_to_hand(self, cell):
@@ -2706,17 +2962,24 @@ class Board:
 
 	def draw(self, player_perspective=0):
 		self.grid.draw(grey, player_perspective=player_perspective)
+		if self.selected_cell != None:
+			pg.draw.rect(screen, green, self.grid.get_cell_rect(self.selected_cell), 1)
+
 
 		# Draw the cards in the board
-		for x in range(self.size[0]):
-			for y in range(self.size[1]):
-				card = self.unit_cards[x][y]
-				if card != None:
-					if player_perspective == 1:
-						y = self.size[1] - 1 - y
-					card_pos = self.grid.get_cell_pos((x,y), align=('center','top'))
-					card_pos[0] -= board_card_size[0]//2
-					card.draw(card_pos, 'board')
+		# For each type of card (unit, building, ...) loop through all cells and draw the card
+		# (Draw unit cards on top of building cards)
+		for card_group in (self.building_cards, self.unit_cards):
+			for x in range(self.size[0]):
+				for y in range(self.size[1]):
+					card = card_group[x][y]
+					if card != None:
+						if player_perspective == 1:
+							y = self.size[1] - 1 - y
+						card_pos = self.grid.get_cell_pos((x,y), align=('center','top'))
+						card_pos[0] -= board_card_size[0]//2
+						card.draw(card_pos, 'board')
+
 
 try:
 	if sys.argv[2] == 'l':
@@ -2731,6 +2994,7 @@ pg.init()
 pg.key.set_repeat(300, 30)
 screen_size = (800,800)
 screen = pg.display.set_mode(screen_size)
+card_text_v_sm = pg.font.Font("Montserrat-Regular.ttf", 12)
 card_text_sm = pg.font.Font("Montserrat-Regular.ttf", 18)
 card_text_med = pg.font.Font("Montserrat-Regular.ttf", 24)
 card_text_lg = pg.font.Font("Montserrat-Regular.ttf", 32)
