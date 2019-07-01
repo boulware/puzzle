@@ -720,9 +720,10 @@ class BuilderCard(CreatureCard):
 			self.advance_card()
 
 	def build(self):
-		self.sub_board[self.cell] = None
-		self.target_building.pending = False
+		self.board.delete_unit_from_board(cell=self.cell, sync=True) # Delete builder from board
 
+		self.target_building.pending = False # Set the building to finished
+		self.board.place_card(cell=self.cell, card=self.target_building, owner=self.owner, sync=True) # Place the building
 
 	def move_to_hand(self, hand):
 		if self.sub_board == None:
