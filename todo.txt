@@ -1,6 +1,0 @@
-1) Mess with sockets and get some basic netplay stuff going.
-2) When unfocusing ui_elements in a container, if you don't access unfocus through the UI_Group, then the UI_Group.focused_container won't update properly
-3) empty message in chat box glitches
-4) hitting host multiple times glitch
-5) disconnecting doesn't properly show that the connection has ended
-6) Some kind of cascading input catching, so I can give certain inputs ('typable' input, ESC, return) to certain UI elements based on what is in focus, and then pass the 'unused' input down the chain to other elements.

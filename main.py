@@ -43,8 +43,8 @@ gold = (255,215,0)
 pink = (255,200,200)
 
 # Game parameters
-grid_count = (4,4)
-node_size = (90,90)
+grid_count = (5,6)
+node_size = (80,80)
 action_panel_size = (120,120)
 action_icon_size = (40,40)
 grid_origin = (100,10)
@@ -152,20 +152,25 @@ class Grid:
 
 		for direction, distance in distances.items():
 			distance = max(0, distance)
-			if direction == 'up':
-				x_range = [start_cell[0]]
-				y_range = range(start_cell[1] - distance, start_cell[1]+1)
+			if direction == 'forward':
+				dxs = [0] # difference between 		start_x and target_x
+				dys = range(distance+1) # .. 	..	start_y and target_y
 			elif direction == 'right':
-				x_range = range(start_cell[0], start_cell[0] + (distance+1))
-				y_range = [start_cell[1]]
-			elif direction == 'down':
-				x_range = [start_cell[0]]
-				y_range = range(start_cell[1], start_cell[1] + (distance+1))
+				dxs = range(distance+1)
+				dys = [0]
+			elif direction == 'backward':
+				dxs = [0]
+				dys = range(0, -(distance+1), -1)
 			elif direction == 'left':
-				x_range = range(start_cell[0] - distance, start_cell[0]+1)
-				y_range = [start_cell[1]]
+				dxs = range(0, -(distance+1), -1)
+				dys = [0]
+			else:
+				print('get_cells_in_directions received invalid direction key')
+				return []
 
-			cells += [(x,y) for x in x_range for y in y_range if self.check_cell_valid(cell=(x,y)) == True]
+			start_x = start_cell[0]
+			start_y = start_cell[1]
+			cells += [(start_x+dx, start_y+dy) for dx in dxs for dy in dys if self.check_cell_valid(cell=(start_x+dx,start_y+dy)) == True]
 
 		return list(set(cells)) # Remove duplicate cells
 
@@ -463,19 +468,24 @@ class Card:
 	def act(self):
 		if self.current_action == None: return
 		
-		print(self.actions)
 		self.actions[self.current_action]()
 
 	def visible_cells(self):
 		if self.cell == None: return []
 
+		# Alter the directions to make visibility work in the correct direction
+		# TODO: Make this less janky
+		if self.owner == 0:
+			directions = ('backward', 'left', 'forward', 'right')
+		else:
+			directions = ('forward', 'right', 'backward', 'left')
+
 		if len(self.visibility) == 1:
 			distance = self.visibility[0]
-			distance_dict = {direction:distance for direction in ('up','right','down','left')}
+			distance_dict = {direction:distance for direction in directions}
 			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
 															distances=distance_dict)
 		elif len(self.visibility) == 4:
-			directions = ['up','right','down','left']
 			distances = self.visibility
 			distance_dict = dict(zip(directions, distances))
 			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
@@ -609,13 +619,19 @@ class Card:
 			screen.blit(self.board_surface, pos)
 
 class BuildingCard(Card):
-	def __init__(self, name, cost, max_health, visibility, health=None, enter_fns=[]):
+	def __init__(self, name, cost, max_health, visibility, health=None, active_actions=[], enter_fns=[]):
 		Card.__init__(self=self, name=name, cost=cost, visibility=visibility)
 
 		self._health_component = HealthComponent(max_health=max_health, health=health)
+		self.actions.update(active_actions)
+		#self.active_actions = active_actions
 		self.enter_fns = enter_fns
 
 		self.pending = False
+
+	def visible_cells(self):
+		if self.pending == True: return [] # Don't show map if the building isn't built yet
+		return Card.visible_cells(self)
 
 	@property
 	def board(self):
@@ -684,8 +700,6 @@ class CreatureCard(Card):
 			target_cell = (self.cell[0], self.cell[1]-1)
 		else:
 			target_cell = (self.cell[0], self.cell[1]+1)
-
-		print(target_cell)
 
 		self.board.move_unit(start_cell=self.cell, target_cell=target_cell, sync=True)
 
@@ -1937,9 +1951,10 @@ class Field(GameState):
 		self.hands = [Hand(self), Hand(self)]
 
 		for _, hand in enumerate(self.hands):
-			hand.add_card("Goblin", 1)
-			hand.add_card('Elf', 2)
-			hand.add_card("Blacksmith", 1)
+			hand.add_card('Goblin', 1)
+			hand.add_card('Elf', 1)
+			hand.add_card('Blacksmith', 1)
+			hand.add_card('Satellite', 1)
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 
@@ -2140,16 +2155,18 @@ class Field(GameState):
 		if self.phase.name == 'Act':
 			for lane in range(self.board.lane_count):
 				for rank in range(self.board.rank_count):
-					cell = (lane,rank) # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
+					cell = (lane,rank)
 					if self.player_turn == 0:
 						absolute_cell = cell
 					else:
 						absolute_cell = (cell[0], self.board.rank_count-1-cell[1]) # Corrected for player orientation (actual grid coords)
 
+					card = self.board.unit_cards[absolute_cell] # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
+					if card == None: continue
 
-					card = self.board.unit_cards[absolute_cell]
-					if card != None and card.owner == self.player_turn:
+					if card.owner == self.player_turn:
 						card.act()
+
 					# if card != None and isinstance(card, CreatureCard):
 					# 	if card != None and card.owner == self.player_turn:
 					# 		if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
@@ -2422,15 +2439,17 @@ class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
 
-		goblin_card_prototype = CreatureCard(name="Goblin", cost=2, base_power=1, max_health=2, visibility=[1])
+		goblin_card_prototype = CreatureCard(name='Goblin', cost=2, base_power=1, max_health=2, visibility=[1])
 		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,0,0,0])
-		drone_card_prototype = BuilderCard(name="Drone", cost=1, base_power=0, max_health=1, visibility=[1])
-		blacksmith_card_prototype = BuildingCard(name="Blacksmith", cost=1, max_health=4, visibility=[0])
+		drone_card_prototype = BuilderCard(name='Drone', cost=1, base_power=0, max_health=1, visibility=[1])
+		blacksmith_card_prototype = BuildingCard(name='Blacksmith', cost=1, max_health=4, visibility=[0])
+		satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0])
 
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(elf_card_prototype)
 		self.card_pool.add_card(drone_card_prototype)
 		self.card_pool.add_card(blacksmith_card_prototype)
+		self.card_pool.add_card(satellite_card_prototype)
 
 		self.network_data_queue = []
 
@@ -2845,12 +2864,77 @@ class Board:
 		grid_origin = (screen_size[0]//2-int((size[0]*node_size[0])//2), screen_size[1]//2-int((size[1]*node_size[1])//2))
 		self.grid = Grid(dimensions=size, origin=grid_origin, cell_size=node_size)
 
+		player_count = 2
+		self._fow_visible_cells = [[] for player in range(player_count)]
+		self._generate_default_fow_surfaces()
+
+
 		self.selected_cell = None
 		player_count = 2
 		self.queued_cards = [[None]*grid_count[0] for i in range(player_count)]
 
 	def __iter__(self):
 		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self.unit_cards)])
+
+	def reveal_cells(self, cells, player):
+		visible_cells = self._fow_visible_cells[player]
+		for cell in cells:
+			if cell not in visible_cells:
+				visible_cells.append(cell)
+
+		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
+		transparent_cell.fill(pink)
+		for cell in cells:
+			if player == 1:
+				# Adjusted for player perspective
+				relative_cell = (cell[0], self.size[1] - 1 - cell[1])
+			else:
+				relative_cell = cell
+
+			cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
+			cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
+			draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
+
+	def refresh_fow(self):
+		self._generate_default_fow_surfaces()
+		for player in range(2):
+			for card in self:
+				if card != None and card.owner == player:
+					self.reveal_cells(cells=card.visible_cells(), player=player)
+
+
+	def _generate_default_fow_surfaces(self):
+		self.fow_surfaces = [pg.Surface((self.grid.rect.width+1, self.grid.rect.height+1)) for player in range(2)]
+		for surface in self.fow_surfaces:
+			surface.fill(black)
+			surface.set_alpha(200)
+			# We'll draw pink squares on top of visible squares to remove the FOW
+			surface.set_colorkey(pink)
+
+		# The cells that are visible by default (closest 2 ranks to your side, as of writing this comment)
+		p0_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-2,self.size[1])]
+		p1_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(0,2)]
+
+		# for card in self:
+		# 	if card != None and card.owner == player_perspective:
+		# 		fow_visible_cells += card.visible_cells()
+
+		self._fow_visible_cells[0] = p0_fow_default_visible_cells
+		self._fow_visible_cells[1] = p1_fow_default_visible_cells
+
+		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
+		transparent_cell.fill(pink)
+		for player in range(2):
+			for cell in self._fow_visible_cells[player]:
+				if player == 1:
+					# Adjusted for player perspective
+					relative_cell = (cell[0], self.size[1] - 1 - cell[1])
+				else:
+					relative_cell = cell
+
+				cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
+				cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
+				draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
 
 	@property
 	def lane_count(self):
@@ -2899,6 +2983,7 @@ class Board:
 				send_string = 'card placed;' + card.name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';' + str(owner) + ';[END]'
 				self.field.game.queue_network_data(send_string.encode('utf-8'))
 
+			self.refresh_fow()
 			return True # Successfully fulfilled requirements for placing the card and placed it.
 		else:
 			print("Tried to place card in invalid cell or tried to place None card")
@@ -2907,6 +2992,7 @@ class Board:
 	def delete_unit_from_board(self, cell, sync):
 		if self.unit_cards[cell] != None:
 			self.unit_cards[cell] = None
+			self.refresh_fow()
 
 			if sync == True:
 				send_string = 'unit deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
@@ -2915,6 +3001,7 @@ class Board:
 	def delete_building_from_board(self, cell, sync):
 		if self.building_cards[cell] != None:
 			self.building_cards[cell] = None
+			self.refresh_fow()
 
 			if sync == True:
 				send_string = 'building deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
@@ -3031,43 +3118,14 @@ class Board:
 			# Draw the green highlight around border of selected cell
 			pg.draw.rect(screen, green, self.grid.get_cell_rect(self.selected_cell), 1)
 
-		fow_surface = pg.Surface((self.grid.rect.width+1, self.grid.rect.height+1))
-		fow_surface.fill(black)
-		fow_surface.set_alpha(200)
-		# We'll draw pink squares on top of visible squares to remove the FOW
-		fow_surface.set_colorkey(pink)
-
-		if player_perspective == 0:
-			fow_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-2,self.size[1])]
-		else:
-			fow_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(0,2)]
-		for card in self:
-			if card != None and card.owner == player_perspective:
-				fow_visible_cells += card.visible_cells()
-
-		fow_visible_cells = list(set(fow_visible_cells))
-
-		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
-		transparent_cell.fill(pink)
-		for cell in fow_visible_cells:
-			if player_perspective == 1:
-				# Adjusted for player perspective
-				relative_cell = (cell[0], self.size[1] - 1 - cell[1])
-			else:
-				relative_cell = cell
-
-			cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
-			cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
-			draw_surface_aligned(target=fow_surface, source=transparent_cell, pos=cell_pos, align=('center','center'))
-
-		screen.blit(fow_surface, self.grid.origin)
+		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)
 
 		# Draw the cards in the board
 		# For each type of card (unit, building, ...) loop through all cells and draw the card
 		# (Draw unit cards on top of building cards)
 		for card in self:
 			if card != None:
-				if card.cell in fow_visible_cells:
+				if card.cell in self._fow_visible_cells[player_perspective]:
 					cell_x, cell_y = card.cell
 					if player_perspective == 1:
 						cell_y = self.size[1] - 1 - cell_y
