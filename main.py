@@ -430,6 +430,150 @@ class HealthComponent:
 	def draw(self, pos):
 		screen.blit(self.health_bar.surface, pos)
 
+class Action:
+	def __init__(self, card):
+		self.card = card
+		self.surface = None
+
+	@property
+	def board(self):
+		return self.card.board
+
+	@property
+	def owner(self):
+		return self.card.owner
+
+	def do(self):
+		raise NotImplementedError()
+
+class MoveAction(Action):
+	def __init__(self, card):
+		Action.__init__(self=self, card=card)
+
+	@property
+	def target_cell(self):
+		if self.board == None: return
+
+		return self.card.get_front_cell()
+
+	def do(self):
+		if self.target_cell == None: return
+
+		if self.board.check_cell_valid(cell=self.target_cell) == False:
+			pass # If we're trying to move into an invalid cell, do nothing
+
+		target_card = self.board.unit_cards[self.target_cell]
+		if target_card == None:
+			# There's no unit in the way; just move to the cell
+			self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
+		else:
+			pass # If there's a unit in the way and we're just moving (not attack moving), do nothing
+	
+class AttackMoveAction(Action):
+	def __init__(self, card):
+		Action.__init__(self=self, card=card)
+
+	@property
+	def target_cell(self):
+		if self.board == None: return
+
+		return self.card.get_front_cell()	
+
+	def do(self):
+		# TODO: This check only works if the unit can only move 'forward'
+		if self.board.check_cell_valid(cell=self.target_cell) == False:
+			# The unit is at the farthest cell (so it should deal damage to the enemy)
+			self.board.delete_unit_from_board(cell=self.card.cell, sync=True)
+			self.board.field.change_health(amount=-self.card.power, player=self.card.enemy, sync=True)
+
+		# the card occupying the target_cell (if nothing does, None)
+		target_card = self.board.unit_cards[self.target_cell]
+		if target_card == None:
+			# There's no unit in the way; just move to the cell
+			self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
+		else:
+			# There's a unit in the way; attack if it's owned by the enemy
+			if self.target_card.owner != self.owner:
+				self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
+
+class BuildAction(Action):
+	def __init__(self, card, target_building=None):
+		Action.__init__(self=self, card=card)
+
+		self.target_building = target_building
+
+	@property
+	def target_building(self):
+		return self._target_building
+
+	@target_building.setter
+	def target_building(self, value):
+		self._target_building = value
+
+	@property
+	def target_cell(self):
+		if self.board == None: return
+
+		return self.card.cell
+
+	def do(self):
+		self.board.delete_unit_from_board(cell=self.card.cell, sync=True) # Delete builder from board
+
+		self.target_building.pending = False # Set the building to finished
+		self.target_building.complete() # Complete the building
+
+class MoveBuildAction(Action):
+	def __init__(self, card, target_building=None):
+		Action.__init__(self=self, card=card)
+		self.move_action = MoveAction(card=card)
+		self.build_action = BuildAction(card=card, target_building=target_building)
+
+	@property
+	def target_building(self):
+		return self.build_action.target_building
+
+	@target_building.setter
+	def target_building(self, value):
+		self.build_action.target_building = value
+
+	def do(self):
+		if self.card.cell == None: return
+
+		if self.card.cell == self.target_building.cell:
+			self.build_action.do()
+		else:
+			self.move_action.do()
+
+class ScanAction(Action):
+	def __init__(self, card, scan_range=1):
+		Action.__init__(self=self, card=card)
+
+		self.target_cell = None
+		self.scan_range = scan_range
+		self.surface = pg.image.load('scan.png')
+	
+	@property
+	def target_cell(self):
+		if self.board == None: return
+
+		return self._target_cell
+	
+	@target_cell.setter
+	def target_cell(self, value):
+		if self.board == None: return
+
+		if self.board.check_cell_valid(cell=value):
+			self._target_cell = value
+
+	def do(self):
+		if self.target_cell != None:
+			self.board.reveal_cells(cells=self.target_cell, player=self.owner)
+
+	def draw(self):
+		if self.board == None: return
+		
+		self.board.grid.draw_surface_in_cell(source=self.surface, cell=self.target_cell, align=('center','center'))
+
 class Card:
 	def __init__(self, name, cost, visibility):
 		self.name = name
@@ -438,7 +582,7 @@ class Card:
 		self.cell = None
 		self._owner = None
 
-		self.actions = {}
+		self.active_actions = {}
 		self.current_action = None
 
 		self.dirty = True
@@ -462,13 +606,53 @@ class Card:
 		else:
 			self.visibility = visibility
 
-		# The "sub"-board upon which this card should be placed (unit, building, etc.)
-		self.sub_board = None
+		self.queue_lane = None
+
+	def queue(self, board, cell, owner):
+		lane = cell[0]
+		active_queue = board.queued_cards[owner] # Queue of the active player
+		previous_card = active_queue[lane] # Card in the lane queue already
+
+		# If there's a card already in the queue, unqueue it
+		if previous_card != None:
+			previous_card.unqueue_card()
+
+		active_queue[lane] = self
+		self.board = board
+		self.owner = owner
+		self.queue_lane = lane
+
+	def unqueue(self):
+		self.board.active_hand.add_card(name=self.name)
+		self.board = None
+		self.owner = None
+		self.queue_lane = None
+
+	def place_queued(self):
+		if self.queue_lane == None: return
+
+		active_queue = board.queued_cards[self.owner]
+		target_rank = board.get_front_rank(player=self.owner)
+		target_lane = self.queue_lane
+		target_cell = (target_lane, target_rank)
+		if self.board.unit_cards[target_cell] == None:
+			self.board.unit_cards[target_cell] = self
+			self.cell = target_cell
+			self.queue_lane = None
+
+	def place(self, board, sub_board, cell, owner):
+		self.cell = cell
+		self.board = board
+		self.owner = owner
+		sub_board[cell] = self
 
 	def act(self):
 		if self.current_action == None: return
 		
-		self.actions[self.current_action]()
+		if self.current_action in self.active_actions:
+			self.active_actions[self.current_action].do()
+		else:
+			print("Tried to do invalid action: ", self.current_action)
 
 	def visible_cells(self):
 		if self.cell == None: return []
@@ -619,18 +803,38 @@ class Card:
 			screen.blit(self.board_surface, pos)
 
 class BuildingCard(Card):
-	def __init__(self, name, cost, max_health, visibility, health=None, active_actions=[], enter_fns=[]):
+	def __init__(self, name, cost, max_health, visibility, health=None, active_actions={}, enter_fns=[]):
 		Card.__init__(self=self, name=name, cost=cost, visibility=visibility)
 
 		self._health_component = HealthComponent(max_health=max_health, health=health)
-		self.actions.update(active_actions)
-		#self.active_actions = active_actions
+		self.active_actions.update(active_actions)
 		self.enter_fns = enter_fns
 
+		self.pending = False	
+
+	def queue(self, board, cell, owner):
+		lane = cell[0]
+		active_queue = board.queued_cards[owner] # Queue of the active player
+		previous_card = active_queue[lane] # Card in the lane queue already
+
+		# If there's a card already in the queue, unqueue it
+		if previous_card != None:
+			previous_card.unqueue_card()
+
+		drone = board.field.game.card_pool.get_card_by_name(name='Drone')
+		drone.target_building = self
+		drone.queue(board=board, cell=cell, owner=owner)
+		self.place(board=board, cell=cell, owner=owner)
+
+	def place(self, board, cell, owner):
+		Card.place(self=self, board=board, sub_board=board.building_cards, cell=cell, owner=owner)
+
+	# TODO: Add network sync; the problem is I've been relying on board.place_card, but this doesn't go through that method
+	def complete(self):
 		self.pending = False
 
 	def visible_cells(self):
-		if self.pending == True: return [] # Don't show map if the building isn't built yet
+		if self.pending == True: return [] # Don't show on the map if the building isn't built yet
 		return Card.visible_cells(self)
 
 	@property
@@ -656,6 +860,7 @@ class BuildingCard(Card):
 
 	def _generate_board_surface(self):
 		Card._generate_board_surface(self)
+		print('building surface generated')
 
 		if self.pending == True:
 			pending_text_surface = card_text_v_sm.render('Pending', True, green)
@@ -683,25 +888,44 @@ class CreatureCard(Card):
 	def __init__(self, name, cost, base_power, max_health, visibility, health=None):
 		Card.__init__(self=self, name=name, visibility=visibility, cost=cost)
 
-		self.actions.update({'F': self.advance_card})
-		self.current_action = 'F'
+		self.active_actions.update({'M': MoveAction(card=self), 'AM': AttackMoveAction(card=self)})
+		self.current_action = 'AM'
 
 		self.base_power = base_power
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
-		# Which "sub"-board this card should be placed on (unit, building, etc.)
-		self.sub_board = None
-		self.queue_lane = None
+	def place(self, board, cell, owner):
+		Card.place(self=self, board=board, sub_board=board.unit_cards, cell=cell, owner=owner)
 
-	def advance_card(self):
-		if self.cell == None: return
+	# Returns the cell directly in front of the card (assuming it's facing towards the enemy)
+	def get_front_cell(self):
+		if self.cell == None: return None
 
 		if self.owner == 0:
 			target_cell = (self.cell[0], self.cell[1]-1)
 		else:
 			target_cell = (self.cell[0], self.cell[1]+1)
 
-		self.board.move_unit(start_cell=self.cell, target_cell=target_cell, sync=True)
+		return target_cell
+
+	def attack_move(self):
+		target_cell = self.get_front_cell()
+		# TODO: This only works if the unit can only move 'forward'
+		if self.board.check_cell_valid(cell=target_cell) == False:
+			# The unit is at the farthest cell (so it should deal damage to the enemy)
+			self.board.delete_unit_from_board(cell=self.cell, sync=True)
+			self.board.field.change_health(amount=-self.power, player=self.enemy, sync=True)
+
+		# the card occupying the target_cell (if nothing does, None)
+		target_card = self.board.unit_cards[target_cell]
+		if target_card == None:
+			# There's no unit in the way; just move to the cell
+			self.board.move_unit(start_cell=self.cell, target_cell=target_cell, sync=True)
+		else:
+			# There's a unit in the way; attack if it's owned by the enemy
+			if target_card.owner != self.owner:
+				self.board.fight_cards(attacker_cell=self.cell, defender_cell=target_cell, sync=True)
+
 
 	@property
 	def board(self):
@@ -709,11 +933,13 @@ class CreatureCard(Card):
 
 	@board.setter
 	def board(self, value):
-		if value == None:
-			self.sub_board = None
-		else:
-			self._board = value
-			self.sub_board = self._board.unit_cards
+		self._board = value
+
+	@property
+	def sub_board(self):
+		if self.board == None: return
+		return self.board.unit_cards
+	
 
 	@property
 	def power(self):
@@ -776,28 +1002,21 @@ class BuilderCard(CreatureCard):
 								base_power=base_power, max_health=max_health, 
 								visibility=visibility, health=health)
 
-		self.actions.update({'MB': self.move_build})
+		self.active_actions.update({'MB': MoveBuildAction(card=self)})
 		self.current_action = 'MB'
 
 		self.base_power = base_power
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
-		self.target_building = None
 
-	def move_build(self):
-		if self.cell == None: return
+	@property
+	def target_building(self):
+		return self.active_actions['MB'].target_building
 
-		if self.cell == self.target_building.cell:
-			self.build()
-		else:
-			self.advance_card()
-
-	def build(self):
-		self.board.delete_unit_from_board(cell=self.cell, sync=True) # Delete builder from board
-
-		self.target_building.pending = False # Set the building to finished
-		self.board.place_card(cell=self.cell, card=self.target_building, owner=self.owner, sync=True) # Place the building
-
+	@target_building.setter
+	def target_building(self, value):
+		self.active_actions['MB'].target_building = value
+	
 	def move_to_hand(self, hand):
 		if self.sub_board == None:
 			print('sub_board not set')
@@ -2072,45 +2291,15 @@ class Field(GameState):
 		else:
 			return False
 
-	# def queue_card(self, card, lane):
-	# 	# queue of the active player
-	# 	active_queue = self.queued_cards[self.player_number]
-	# 	previous_card = active_queue[lane] # Card in the lane queue already
-
-	# 	if previous_card != None:
-	# 		if isinstance(previous_card, BuilderCard):
-	# 			if previous_card.target_building != None:
-	# 				previous_card.target_building.move_to_hand(hand=self.active_hand)
-	# 				# Builder card doesn't get returned to hand, since they aren't actual 'cards',
-	# 				# but rather are spawned along with pending buildings
-
-	# 		# Return the currently queued card back to the hand, to be replaced with the queued card
-	# 		# Builder cards automatically get deleted in move_to_hand()
-	# 		previous_card.move_to_hand(hand=self.active_hand)
-
-	# 	active_queue[lane] = card
-	# 	card.queue_lane = lane
-
-
-
 	def left_mouse_released(self, mouse_pos):
 		if self.drag_card:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
 			if self.is_current_player_active() and self.phase.name == 'Build':
-				if isinstance(self.drag_card, CreatureCard):
-					cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
-					if cell != None:
-						self.board.queue_card(lane=cell[0], card=self.drag_card, player=self.player_number)
-						placed_in_board = True
-				elif isinstance(self.drag_card, BuildingCard):
-					cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
-					if cell != None:
-						self.board.queue_building(cell=cell, building_card=self.drag_card, owner=self.player_number)
-						drone = self.game.card_pool.get_card_by_name(name='Drone')
-						drone.target_building = self.drag_card
-						self.board.queue_card(card=drone, lane=cell[0], player=self.player_number)
-						placed_in_board = True
+				cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+				if cell != None:
+					self.drag_card.queue(board=self.board, cell=cell, owner=self.player_number)
+					placed_in_board = True
 			
 			if placed_in_board == False:
 				self.active_hand.add_card(name=self.drag_card.name)
@@ -2161,28 +2350,14 @@ class Field(GameState):
 					else:
 						absolute_cell = (cell[0], self.board.rank_count-1-cell[1]) # Corrected for player orientation (actual grid coords)
 
-					card = self.board.unit_cards[absolute_cell] # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
-					if card == None: continue
+					building_card = self.board.building_cards[absolute_cell]
+					unit_card = self.board.unit_cards[absolute_cell] # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
 
-					if card.owner == self.player_turn:
-						card.act()
+					if building_card != None and building_card.owner == self.player_turn:
+						building_card.act()
 
-					# if card != None and isinstance(card, CreatureCard):
-					# 	if card != None and card.owner == self.player_turn:
-					# 		if cell[1] == self.board.rank_count-1: # If the unit is on the furthest possible rank (immediately next to enemy)
-					# 				self.board.delete_unit_from_board(cell=absolute_cell, sync=sync)
-					# 				self.change_health(amount=-card.power, player=card.enemy, sync=sync)
-					# 		else:
-					# 			target_cell = (cell[0], cell[1]+1)
-					# 			if self.player_turn == 0:
-					# 				absolute_target_cell = (target_cell[0], self.board.rank_count-1-target_cell[1]) # Corrected for player orientation (actual grid coords)
-					# 			else:
-					# 				absolute_target_cell = target_cell
-
-					# 			if self.board.unit_cards[absolute_target_cell] == None:
-					# 				self.board.move_unit(start_cell=absolute_cell, target_cell=absolute_target_cell, sync=sync)
-					# 			else:
-					# 				self.board.fight_cards(attacker_cell=absolute_cell, defender_cell=absolute_target_cell, sync=sync)
+					if unit_card != None and unit_card.owner == self.player_turn:
+						unit_card.act()
 
 			# Transfer queued cards to battlefield in closest rank
 			for lane_number, queued_card in enumerate(self.board.queued_cards[self.player_turn]):
@@ -2285,7 +2460,7 @@ class Field(GameState):
 		if self.board.selected_cell != None:
 			selected_card = self.board.unit_cards[self.board.selected_cell]
 			if selected_card != None:
-				for i, action in enumerate(selected_card.actions):
+				for i, action in enumerate(selected_card.active_actions):
 					row = i // panel_count_x
 					col = i % panel_count_y
 
@@ -2443,7 +2618,8 @@ class Game:
 		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,0,0,0])
 		drone_card_prototype = BuilderCard(name='Drone', cost=1, base_power=0, max_health=1, visibility=[1])
 		blacksmith_card_prototype = BuildingCard(name='Blacksmith', cost=1, max_health=4, visibility=[0])
-		satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0])
+		satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0],
+												active_actions={'SCN': lambda _: ScanAction(card=self,scan_range=1)})
 
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(elf_card_prototype)
@@ -2876,6 +3052,27 @@ class Board:
 	def __iter__(self):
 		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self.unit_cards)])
 
+
+	# Returns the rank index for the nth rank, relative to player.
+	# n=0 -> the rank closest to the player
+	# n=1 -> second-closest rank
+	# ...
+	def get_nth_rank(self, n, player):
+		if player == 0:
+			return clamp(self.size[1]-1-n, 0, self.size[1]-1)
+		elif player == 1:
+			return clamp(n, 0, self.size[1]-1)
+		else:
+			print("Invalid player given to get_nth_rank()")
+			return 0
+
+	# Returns rank closest to player
+	def get_front_rank(self, player):
+		return self.get_nth_rank(n=0, player=player)
+
+	def check_cell_valid(self, cell):
+		return self.grid.check_cell_valid(cell=cell)
+
 	def reveal_cells(self, cells, player):
 		visible_cells = self._fow_visible_cells[player]
 		for cell in cells:
@@ -2944,40 +3141,13 @@ class Board:
 	def rank_count(self):
 		return self.size[1]
 
-	def queue_card(self, card, lane, player):
-		# queue of the active player
-		active_queue = self.queued_cards[player]
-		previous_card = active_queue[lane] # Card in the lane queue already
-
-		if previous_card != None:
-			if isinstance(previous_card, BuilderCard):
-				if previous_card.target_building != None:
-					previous_card.target_building.move_to_hand(hand=self.field.active_hand)
-
-			# Return the currently queued card back to the hand, to be replaced with the queued card
-			# Builder cards automatically get deleted in move_to_hand()
-			previous_card.move_to_hand(hand=self.field.active_hand)
-
-		active_queue[lane] = card
-		card.board = self
-		card.owner = player
-		card.queue_lane = lane
-
 	def queue_building(self, cell, building_card, owner):
-		self.place_card(cell=cell, card=building_card, owner=owner, sync=False)
 		building_card.pending = True
+		self.place_card(cell=cell, card=building_card, owner=owner, sync=False)
 
 	def place_card(self, cell, card, owner, sync):
-		if self.grid.check_cell_valid(cell) == True and card != None:
-			if isinstance(card, BuildingCard):
-				sub_board = self.building_cards
-			else:
-				sub_board = self.unit_cards
-
-			card.cell = cell
-			card.board = self
-			card.owner = owner
-			sub_board[cell] = card
+		if self.check_cell_valid(cell) == True and card != None:
+			card.place(board=self, cell=cell, owner=owner)
 
 			if sync == True:
 				send_string = 'card placed;' + card.name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';' + str(owner) + ';[END]'
@@ -3008,7 +3178,7 @@ class Board:
 				self.field.game.queue_network_data(send_string.encode('utf-8'))
 
 	def move_unit(self, start_cell, target_cell, sync):
-		if self.grid.check_cell_valid(start_cell) == False or self.grid.check_cell_valid(target_cell) == False: return
+		if self.check_cell_valid(start_cell) == False or self.check_cell_valid(target_cell) == False: return
 
 		if self.unit_cards[target_cell] == None:
 			card = self.unit_cards[start_cell]
@@ -3114,11 +3284,10 @@ class Board:
 	def draw(self, player_perspective=0):
 		self.grid.draw(grey, player_perspective=player_perspective)
 
+		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)
 		if self.selected_cell != None:
 			# Draw the green highlight around border of selected cell
 			pg.draw.rect(screen, green, self.grid.get_cell_rect(self.selected_cell), 1)
-
-		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)
 
 		# Draw the cards in the board
 		# For each type of card (unit, building, ...) loop through all cells and draw the card
