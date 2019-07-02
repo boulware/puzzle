@@ -611,24 +611,25 @@ class Card:
 		self.queue_lane = None
 
 	def queue(self, board, cell, owner):
-		lane = cell[0]
+		lane = cell[0]	
 		active_queue = board.queued_cards[owner] # Queue of the active player
 		previous_card = active_queue[lane] # Card in the lane queue already
 
 		# If there's a card already in the queue, unqueue it
 		if previous_card != None:
-			previous_card.unqueue_card()
+			previous_card.unqueue()
 
 		active_queue[lane] = self
+		print(self.name, ' board set to ', board)
 		self.board = board
 		self.owner = owner
 		self.queue_lane = lane
 
 	def unqueue(self):
-		self.board.active_hand.add_card(name=self.name)
-		self.board = None
-		self.owner = None
-		self.queue_lane = None
+		print(self.name, '.board = ', self.board)
+		print_callstack()
+		print('***')
+		self.board.field.active_hand.add_card(name=self.name)
 
 	def place_queued(self):
 		if self.queue_lane == None: return
@@ -799,8 +800,12 @@ class Card:
 		return self._board
 
 	@board.setter
-	def board(self, val):
-		self._board = val
+	def board(self, value):
+		if self.name == 'Scout':
+			print('board for ', self.name, ' set to ', value)
+			print_callstack()
+			print('***')
+		self._board = value
 	
 
 	@property
@@ -852,10 +857,11 @@ class BuildingCard(Card):
 
 		# If there's a card already in the queue, unqueue it
 		if previous_card != None:
-			previous_card.unqueue_card()
+			previous_card.unqueue()
 
 		drone = board.field.game.card_pool.get_card_by_name(name='Drone')
 		drone.target_cell = cell
+		print('board=', board)
 		drone.queue(board=board, cell=cell, owner=owner)
 		self.place(board=board, cell=cell, owner=owner)
 		self.activated = False
@@ -958,13 +964,13 @@ class CreatureCard(Card):
 				self.board.fight_cards(attacker_cell=self.cell, defender_cell=target_cell, sync=True)
 
 
-	@property
-	def board(self):
-		return self._board
+	# @property
+	# def board(self):
+	# 	return self._board
 
-	@board.setter
-	def board(self, value):
-		self._board = value
+	# @board.setter
+	# def board(self, value):
+	# 	self._board = value
 
 	@property
 	def sub_board(self):
@@ -1019,6 +1025,9 @@ class CreatureCard(Card):
 		# 	game.change_health(-self.power, self.enemy)
 
 	def clone(self):
+		print(self.name, ' cloned')
+		print_callstack()
+		print('')
 		return CreatureCard(name = self.name,
 							cost = self.cost,
 							base_power = self.base_power,
@@ -1039,6 +1048,9 @@ class BuilderCard(CreatureCard):
 		self.base_power = base_power
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
+	def unqueue(self):
+		if self.target_cell != None:
+			self.board.building_cards[self.target_cell] = None
 
 	@property
 	def target_cell(self):
@@ -2205,6 +2217,7 @@ class Field(GameState):
 			hand.add_card('Elf', 1)
 			hand.add_card('Blacksmith', 1)
 			hand.add_card('Satellite', 1)
+			hand.add_card('Scout', 2)
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 
@@ -2642,6 +2655,7 @@ class Game:
 
 		goblin_card_prototype = CreatureCard(name='Goblin', cost=2, base_power=1, max_health=2, visibility=[1])
 		elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,0,0,0])
+		scout_card_prototype = CreatureCard(name='Scout', cost=1, base_power=0, max_health=1, visibility=[3,0,0,0])
 		drone_card_prototype = BuilderCard(name='Drone', cost=1, base_power=0, max_health=1, visibility=[1])
 		blacksmith_card_prototype = BuildingCard(name='Blacksmith', cost=1, max_health=4, visibility=[0])
 		satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0],
@@ -2650,6 +2664,7 @@ class Game:
 
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(elf_card_prototype)
+		self.card_pool.add_card(scout_card_prototype)
 		self.card_pool.add_card(drone_card_prototype)
 		self.card_pool.add_card(blacksmith_card_prototype)
 		self.card_pool.add_card(satellite_card_prototype)
