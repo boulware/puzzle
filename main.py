@@ -434,6 +434,15 @@ class Action:
 	def __init__(self, card):
 		self.card = card
 		self.surface = None
+		# self.target_cell = None
+
+	@property
+	def target_cell(self):
+		return self._target_cell
+
+	@target_cell.setter
+	def target_cell(self, value):
+		self._target_cell = value
 
 	@property
 	def board(self):
@@ -456,6 +465,10 @@ class MoveAction(Action):
 
 		return self.card.get_front_cell()
 
+	@target_cell.setter
+	def target_cell(self, value):
+		pass
+
 	def do(self):
 		if self.target_cell == None: return
 
@@ -477,7 +490,11 @@ class AttackMoveAction(Action):
 	def target_cell(self):
 		if self.board == None: return
 
-		return self.card.get_front_cell()	
+		return self.card.get_front_cell()
+
+	@target_cell.setter
+	def target_cell(self, value):
+		pass
 
 	def do(self):
 		# TODO: This check only works if the unit can only move 'forward'
@@ -497,65 +514,56 @@ class AttackMoveAction(Action):
 				self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
 
 class BuildAction(Action):
-	def __init__(self, card, target_building=None):
+	def __init__(self, card, target_cell=None):
+		Action.__init__(self=self, card=card)
+		self.target_cell = target_cell
+
+	def do(self):
+		if self.card.cell == self.target_cell:
+			self.board.delete_unit_from_board(cell=self.card.cell, sync=True) # Delete builder from board
+
+			target_building = self.board.building_cards[self.target_cell]
+			if target_building == None: return
+
+			target_building.pending = False # Set the building to finished
+			target_building.complete() # Complete the building
+
+class MoveBuildAction(Action):
+	def __init__(self, card, target_cell=None):
 		Action.__init__(self=self, card=card)
 
-		self.target_building = target_building
-
-	@property
-	def target_building(self):
-		return self._target_building
-
-	@target_building.setter
-	def target_building(self, value):
-		self._target_building = value
+		self.move_action = MoveAction(card=card)
+		self.build_action = BuildAction(card=card, target_cell=target_cell)
+		self.target_cell = target_cell
 
 	@property
 	def target_cell(self):
-		if self.board == None: return
+		return self._target_cell
 
-		return self.card.cell
-
-	def do(self):
-		self.board.delete_unit_from_board(cell=self.card.cell, sync=True) # Delete builder from board
-
-		self.target_building.pending = False # Set the building to finished
-		self.target_building.complete() # Complete the building
-
-class MoveBuildAction(Action):
-	def __init__(self, card, target_building=None):
-		Action.__init__(self=self, card=card)
-		self.move_action = MoveAction(card=card)
-		self.build_action = BuildAction(card=card, target_building=target_building)
-
-	@property
-	def target_building(self):
-		return self.build_action.target_building
-
-	@target_building.setter
-	def target_building(self, value):
-		self.build_action.target_building = value
+	@target_cell.setter
+	def target_cell(self, value):
+		self._target_cell = value
+		self.move_action.target_cell = value
+		self.build_action.target_cell = value
 
 	def do(self):
 		if self.card.cell == None: return
 
-		if self.card.cell == self.target_building.cell:
+		if self.card.cell == self.target_cell:
 			self.build_action.do()
 		else:
 			self.move_action.do()
 
 class ScanAction(Action):
-	def __init__(self, card, scan_range=1):
+	def __init__(self, card, target_cell=None, scan_range=1):
 		Action.__init__(self=self, card=card)
 
-		self.target_cell = None
+		self._target_cell = target_cell
 		self.scan_range = scan_range
 		self.surface = pg.image.load('scan.png')
 	
 	@property
 	def target_cell(self):
-		if self.board == None: return
-
 		return self._target_cell
 	
 	@target_cell.setter
@@ -566,24 +574,28 @@ class ScanAction(Action):
 			self._target_cell = value
 
 	def do(self):
+		print('do scan at ', self.target_cell)
 		if self.target_cell != None:
-			self.board.reveal_cells(cells=self.target_cell, player=self.owner)
+			self.board.reveal_cells(cells=[self.target_cell], player=self.owner)
+			#self.board.refresh_fow()
 
 	def draw(self):
-		if self.board == None: return
-		
+		if self.target_cell == None: return
+
 		self.board.grid.draw_surface_in_cell(source=self.surface, cell=self.target_cell, align=('center','center'))
 
 class Card:
-	def __init__(self, name, cost, visibility):
+	def __init__(self, name, cost, visibility, default_action=None):
 		self.name = name
 		self.cost = cost
+		print('board set for ', self)
 		self.board = None
 		self.cell = None
 		self._owner = None
 
 		self.active_actions = {}
-		self.current_action = None
+		self.default_action = default_action
+		self.current_action = default_action
 
 		self.dirty = True
 
@@ -647,12 +659,24 @@ class Card:
 		sub_board[cell] = self
 
 	def act(self):
+		print(type(self), ' acting with ', self.current_action)
 		if self.current_action == None: return
 		
 		if self.current_action in self.active_actions:
+			print(self.active_actions[self.current_action])
 			self.active_actions[self.current_action].do()
 		else:
 			print("Tried to do invalid action: ", self.current_action)
+
+	@property
+	def target_cell(self):
+		return self._target_cell
+
+	@target_cell.setter
+	def target_cell(self, value):
+		self._target_cell = value
+		for k, action in self.active_actions.items():
+			action.target_cell = value
 
 	def visible_cells(self):
 		if self.cell == None: return []
@@ -776,6 +800,15 @@ class Card:
 		self._generate_board_surface()
 
 	@property
+	def board(self):
+		return self._board
+
+	@board.setter
+	def board(self, val):
+		self._board = val
+	
+
+	@property
 	def owner(self):
 		return self._owner
 
@@ -803,14 +836,18 @@ class Card:
 			screen.blit(self.board_surface, pos)
 
 class BuildingCard(Card):
-	def __init__(self, name, cost, max_health, visibility, health=None, active_actions={}, enter_fns=[]):
-		Card.__init__(self=self, name=name, cost=cost, visibility=visibility)
+	def __init__(self, name, cost, max_health, visibility, health=None, default_action=None, active_actions={}, enter_fns={}):
+		Card.__init__(self=self, name=name, cost=cost, visibility=visibility, default_action=default_action)
+		print(self.board)
 
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 		self.active_actions.update(active_actions)
+		for key in self.active_actions:
+			self.active_actions[key] = self.active_actions[key](card=self)
+
 		self.enter_fns = enter_fns
 
-		self.pending = False	
+		self.pending = False
 
 	def queue(self, board, cell, owner):
 		lane = cell[0]
@@ -822,9 +859,10 @@ class BuildingCard(Card):
 			previous_card.unqueue_card()
 
 		drone = board.field.game.card_pool.get_card_by_name(name='Drone')
-		drone.target_building = self
+		drone.target_cell = cell
 		drone.queue(board=board, cell=cell, owner=owner)
 		self.place(board=board, cell=cell, owner=owner)
+		self.pending = True
 
 	def place(self, board, cell, owner):
 		Card.place(self=self, board=board, sub_board=board.building_cards, cell=cell, owner=owner)
@@ -832,22 +870,17 @@ class BuildingCard(Card):
 	# TODO: Add network sync; the problem is I've been relying on board.place_card, but this doesn't go through that method
 	def complete(self):
 		self.pending = False
+		self.board.refresh_fow()
 
 	def visible_cells(self):
 		if self.pending == True: return [] # Don't show on the map if the building isn't built yet
 		return Card.visible_cells(self)
 
 	@property
-	def board(self):
-		return self._board
-
-	@board.setter
-	def board(self, value):
-		if value == None:
-			self.sub_board = None
-		else:
-			self._board = value
-			self.sub_board = self._board.building_cards
+	def sub_board(self):
+		if self.board == None: return
+		return self.board.building_cards
+	
 
 	@property
 	def pending(self):
@@ -860,7 +893,6 @@ class BuildingCard(Card):
 
 	def _generate_board_surface(self):
 		Card._generate_board_surface(self)
-		print('building surface generated')
 
 		if self.pending == True:
 			pending_text_surface = card_text_v_sm.render('Pending', True, green)
@@ -882,7 +914,9 @@ class BuildingCard(Card):
 							max_health = self.max_health,
 							health = self.health,
 							visibility = self.visibility,
-							enter_fns = self.enter_fns)
+							default_action = self.default_action,
+							enter_fns = copy.copy(self.enter_fns),
+							active_actions = copy.copy(self.active_actions))
 
 class CreatureCard(Card):
 	def __init__(self, name, cost, base_power, max_health, visibility, health=None):
@@ -1010,12 +1044,12 @@ class BuilderCard(CreatureCard):
 
 
 	@property
-	def target_building(self):
-		return self.active_actions['MB'].target_building
+	def target_cell(self):
+		return self.active_actions['MB'].target_cell
 
-	@target_building.setter
-	def target_building(self, value):
-		self.active_actions['MB'].target_building = value
+	@target_cell.setter
+	def target_cell(self, value):
+		self.active_actions['MB'].target_cell = value
 	
 	def move_to_hand(self, hand):
 		if self.sub_board == None:
@@ -1082,7 +1116,7 @@ class Hand:
 		card = self.field.game.card_pool.get_card_by_name(name)
 		if card:
 			for _ in range(count):
-				self.cards.append(card.clone())
+				self.cards.append(card)
 		else:
 			print_callstack()
 			print("Tried to add non-existent card to hand.")
@@ -2316,14 +2350,17 @@ class Field(GameState):
 					self._end_turn(sync=True)
 	
 	def right_mouse_pressed(self, mouse_pos):
-		cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
-		if cell != None:
-			card_name = self.board.return_card_to_hand(cell)
-			if card_name != None:
-				self.board._refresh_passives()
-
-				send_string = 'card removed;' + card_name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';[END]' 
-				self.game.queue_network_data(send_string.encode('utf-8'))
+		# If a cell is selected
+		if self.board.grid.rect.collidepoint(mouse_pos):
+			if self.board.selected_cell != None:
+				selected_building = self.board.building_cards[self.board.selected_cell]
+				if selected_building != None:
+					# print('selected_building=', selected_building.cell, selected_building.name)
+					clicked_cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+					# print('clicked_cell=', clicked_cell)
+					selected_building.target_cell = clicked_cell
+					selected_building.act()
+					# print(selected_building.target_cell)
 
 	def set_active_player(self, player_number):
 		self.player_turn = player_number
@@ -2369,6 +2406,8 @@ class Field(GameState):
 
 					self.board.place_card(cell=cell, card=queued_card, owner=self.player_turn, sync=sync)
 					self.board.queued_cards[self.player_number][lane_number] = None
+
+			self.board.refresh_fow()
 
 		if sync == True:
 			send_string = 'phase advanced' + ';[END]'
@@ -2458,7 +2497,7 @@ class Field(GameState):
 		panel_count_y = panel_height // icon_height
 
 		if self.board.selected_cell != None:
-			selected_card = self.board.unit_cards[self.board.selected_cell]
+			selected_card = self.board.building_cards[self.board.selected_cell]
 			if selected_card != None:
 				for i, action in enumerate(selected_card.active_actions):
 					row = i // panel_count_x
@@ -2569,18 +2608,6 @@ class Field(GameState):
 		if self.drag_card:
 			drawn_in_board = False # True if the drag card gets drawn in the board this frame rather than floating on screen
 
-			# result = self.board.grid.get_cell_at_mouse()
-			# if result['hit'] == True: # If the mouse is hovering over somewhere on the board grid while dragging a card
-			# 	if self.player_number == 0:
-			# 		pos = result['cell']
-			# 	elif self.player_number == 1:
-			# 		pos = (result['cell'][0],self.board.size[1]-1-result['cell'][1])
-			# 	if self.board.cards[pos] == None:
-			# 		cell_top_left = self.board.grid.get_cell_pos(result['cell'], align=('center','top'))
-			# 		cell_top_left[0] -= board_card_size[0]//2
-			# 		self.drag_card.draw(cell_top_left, "board_hover")
-			# 		drawn_in_board = True
-
 			if self.is_current_player_active() and self.phase.name == 'Build':
 				if isinstance(self.drag_card, CreatureCard):
 					# TODO: Shouldn't be getting the mouse position in this way. Fetch it in update()
@@ -2619,7 +2646,8 @@ class Game:
 		drone_card_prototype = BuilderCard(name='Drone', cost=1, base_power=0, max_health=1, visibility=[1])
 		blacksmith_card_prototype = BuildingCard(name='Blacksmith', cost=1, max_health=4, visibility=[0])
 		satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0],
-												active_actions={'SCN': lambda _: ScanAction(card=self,scan_range=1)})
+												default_action='SCN',
+												active_actions={'SCN': lambda card: ScanAction})
 
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(elf_card_prototype)
@@ -3074,10 +3102,11 @@ class Board:
 		return self.grid.check_cell_valid(cell=cell)
 
 	def reveal_cells(self, cells, player):
-		visible_cells = self._fow_visible_cells[player]
 		for cell in cells:
-			if cell not in visible_cells:
-				visible_cells.append(cell)
+			if cell not in self._fow_visible_cells[player]:
+				self._fow_visible_cells[player].append(cell)
+
+		print(self._fow_visible_cells[player])
 
 		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
 		transparent_cell.fill(pink)
