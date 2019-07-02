@@ -568,6 +568,7 @@ class ScanAction(Action):
 	def do(self):
 		if self.target_cell == None: return
 		if self.scans_this_turn >= self.scans_per_turn: return
+		if self.board.is_cell_revealed(cell=self.target_cell, player=self.owner) == True: return
 
 		self.board.reveal_cells(cells=[self.target_cell], player=self.owner)
 		self.scans_this_turn += 1
@@ -3078,6 +3079,11 @@ class Board:
 	def __iter__(self):
 		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self.unit_cards)])
 
+	def is_cell_revealed(self, cell, player):
+		if cell in self._fow_visible_cells[player]:
+			return True
+		else:
+			return False
 
 	# Returns the rank index for the nth rank, relative to player.
 	# n=0 -> the rank closest to the player
