@@ -1,13 +1,3 @@
-import sys, os, copy, traceback, inspect, socket, selectors, types
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
-from collections import namedtuple
-from typing import NamedTuple, Any
-from enum import Enum, auto, IntEnum
-import pygame as pg
-from pygame.math import Vector2 as Vec
-import numpy as np
-from functools import partial
-
 # Some naming conventions used throughout the codebase:
 # 
 # pos vs. cell
@@ -20,27 +10,20 @@ from functools import partial
 # classes/types are uppercased words, unseparated: CreatureCard, Card, ...
 # capitization exceptions: acronyms/initialisms will be all uppercase
 
-# General constants
-black = (0,0,0)
-grey = (127,127,127)
-light_grey = (200,200,200)
-dark_grey = (40,40,40)
-white = (255,255,255)
-red = (255,0,0)
-light_red = (255,100,100)
-dark_red = (70,0,0)
-very_dark_red = (40,0,0)
-green = (0,255,0)
-light_green = (0,150,0)
-dark_green = (0,70,0)
-very_dark_green = (0,40,0)
-blue = (0,0,255)
-light_blue = (100,100,255)
-dark_blue = (0,0,70)
-very_dark_blue = (0,0,40)
-purple = (128,0,128)
-gold = (255,215,0)
-pink = (255,200,200)
+import sys, os, copy, inspect, socket, selectors, types
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+from collections import namedtuple
+from typing import NamedTuple, Any
+from enum import Enum, auto, IntEnum
+import pygame as pg
+from pygame.math import Vector2 as Vec
+import numpy as np
+from functools import partial
+
+import UI
+import colors as c
+import draw
+import util
 
 # Game parameters
 grid_count = (5,6)
@@ -48,61 +31,6 @@ node_size = (80,80)
 action_panel_size = (120,120)
 action_icon_size = (40,40)
 grid_origin = (100,10)
-
-class Node: 
-	def __init__(self, position, strength):
-		self.position = position
-		self.strength = strength
-
-	def draw(self):
-		color_cell(self.position, light_grey)
-		strength_text = node_font.render(str(self.strength), True, red)
-
-
-		#pg.draw.circle(screen, red, pos_to_coords_center(self.position), 1)
-		cell_center = pos_to_coords_center(self.position)
-		screen.blit(strength_text, (cell_center[0] - 0.5*strength_text.get_width(), cell_center[1] - 0.5*strength_text.get_height()))
-
-# Returns a tuple of four sets of coordinates, which are guaranteed to either be a neighbor of (position) or (position) itself
-def get_neighbors(position):
-	neighbors = []
-	candidates = []
-
-	candidates.append((max(0, position[0]-1), position[1]))
-	candidates.append((min(grid_count[0]-1, position[0]+1), position[1]))
-	candidates.append((position[0], max(0, position[1]-1)))
-	candidates.append((position[0], min(grid_count[1]-1, position[1]+1)))
-
-	for candidate in candidates:
-		if candidate != position:
-			neighbors.append(candidate)
-
-	return neighbors
-
-class GameGrid:
-	def __init__(self, size):
-		self.width = size[0]
-		self.height = size[1]
-		self.cells = np.zeros((self.width, self.height), np.int8)
-
-	def set_cell(self, pos, strength):
-		np.put(self.cells, pos, strength)
-
-	def increment_cell(self, pos, amount):
-		self.cells[pos] += amount
-
-	def draw_strengths(self):
-		it = np.nditer(self.cells, flags=['multi_index'])
-		while not it.finished:
-			color = grey
-			if it[0] > 0: color = green
-			if it[0] < 0: color = red
-
-			strength_text = node_font.render(str(it[0]), True, color)
-			cell_center = pos_to_coords_center(it.multi_index)
-			screen.blit(strength_text, (cell_center[0] - 0.5*strength_text.get_width(), cell_center[1] - 0.5*strength_text.get_height()))			
-
-			it.iternext()
 
 class Grid:
 	def __init__(self, dimensions, origin, cell_size):
@@ -252,11 +180,11 @@ class Grid:
 
 	def _generate_surface(self):
 		self.surface = pg.Surface((self.rect.size[0]+1, self.rect.size[1]+1))
-		pg.draw.rect(self.surface, dark_green, ((0,0), self.rect.size))
-		# pg.draw.rect(self.surface, very_dark_blue, ((0,0), (self.rect.width, self.rect.height//2)))
-		# pg.draw.rect(self.surface, very_dark_red, ((0,self.rect.height//2),(self.rect.width,self.rect.height//2)))
+		pg.draw.rect(self.surface, c.dark_green, ((0,0), self.rect.size))
+		# pg.draw.rect(self.surface, c.very_dark_blue, ((0,0), (self.rect.width, self.rect.height//2)))
+		# pg.draw.rect(self.surface, c.very_dark_red, ((0,self.rect.height//2),(self.rect.width,self.rect.height//2)))
 
-		grid_color = white
+		grid_color = c.white
 
 		for x in range(self.dimensions[0]+1):
 			x_start = x*self.cell_size[0]
@@ -265,7 +193,7 @@ class Grid:
 			y_start = y*self.cell_size[1]
 			pg.draw.line(self.surface, grid_color, (0, y_start), (self.cell_size[0]*self.dimensions[0], y_start))		
 
-	def draw(self, color=white, player_perspective=0):
+	def draw(self, color=c.white, player_perspective=0):
 		if self.drawable:
 			if player_perspective == 0:
 				to_flip = False
@@ -309,32 +237,11 @@ class Grid:
 				surface = pg.transform.scale(source, (new_width,new_height)) # new scaled surface
 
 		cell_pos = self.get_cell_pos(cell, align)
-		draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
-
-def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0), alpha=255):
-	align_offset = list(offset)
-
-	if align[0] == 'center':
-		align_offset[0] -= source.get_width()//2
-	elif align[0] == 'right':
-		align_offset[0] -= source.get_width()
-
-	if align[1] == 'center':
-		align_offset[1] -= source.get_height()//2
-	elif align[1] == 'down':
-		align_offset[1] -= source.get_height()
-
-	new_pos = list(np.add(pos,align_offset))
-
-	target.blit(source, new_pos)
-
-	return align_offset
+		draw.draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
 
 hand_card_size = (100,160)
 card_proportion = hand_card_size[0]/hand_card_size[1]
 board_card_size = (int(node_size[0]*card_proportion),node_size[1])
-
-print_callstack = traceback.print_stack
 
 class HealthBar:
 	def __init__(self, max_health, size, health=None):
@@ -359,17 +266,17 @@ class HealthBar:
 	def _generate_surface(self):
 		self._surface = pg.Surface(self.size)
 		red_height = int(self.health/self.max_health*self.size[1])
-		pg.draw.rect(self.surface, red, (0, self.size[1]-red_height, self.size[0], self.size[1]))
+		pg.draw.rect(self.surface, c.red, (0, self.size[1]-red_height, self.size[0], self.size[1]))
 
-		pg.draw.line(self.surface, white, (0,0), (0,self.size[1])) # draw left edge
-		pg.draw.line(self.surface, white, (self.size[0],0), (self.size[0], self.size[1])) # draw right edge
+		pg.draw.line(self.surface, c.white, (0,0), (0,self.size[1])) # draw left edge
+		pg.draw.line(self.surface, c.white, (self.size[0],0), (self.size[0], self.size[1])) # draw right edge
 
 		# draw borders which delineate cells (max_health+1 because we're drawing borders, not the cells themselves)
 		for y in np.linspace(0, self.size[1], self.max_health+1):
-			pg.draw.line(self.surface, white, (0,y), (self.size[0],y))
+			pg.draw.line(self.surface, c.white, (0,y), (self.size[0],y))
 
 	def _clamp_health(self):
-		self.health = np.clip(self.health, 0, self.max_health)
+		self.health = util.clamp(self.health, 0, self.max_health)
 
 	@property
 	def max_health(self):
@@ -422,7 +329,7 @@ class HealthComponent:
 		self.health_bar.set_health(self._health)
 
 	def _clamp_health(self):
-		self._health = clamp(self._health, 0, self.max_health)
+		self._health = util.clamp(self._health, 0, self.max_health)
 
 	def change_health(self, amount):
 		self.health += amount
@@ -516,27 +423,36 @@ class AttackMoveAction(Action):
 				self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
 
 class BuildAction(Action):
-	def __init__(self, card, target_cell=None):
+	def __init__(self, card, target_cell=None, target_building=None):
 		Action.__init__(self=self, card=card)
 		self.target_cell = target_cell
+		self.target_building = target_building
 
 	def do(self):
 		if self.card.cell == self.target_cell:
 			self.board.delete_unit_from_board(cell=self.card.cell, sync=True) # Delete builder from board
 
-			target_building = self.board.building_cards[self.target_cell]
-			if target_building == None: return
-
-			target_building.complete() # Complete the building
+			self.board.place_card(cell=self.target_cell, card=self.target_building, owner=self.owner, sync=True)
 
 class MoveBuildAction(Action):
-	def __init__(self, card, target_cell=None):
+	def __init__(self, card, target_cell=None, target_building=None):
 		Action.__init__(self=self, card=card)
 
 		self.move_action = MoveAction(card=card)
 		self.build_action = BuildAction(card=card, target_cell=target_cell)
 		self.target_cell = target_cell
+		self.target_building = target_building
 
+	@property
+	def target_building(self):
+		return self._target_building
+
+	@target_building.setter
+	def target_building(self, value):
+		self._target_building = value
+		self.move_action.target_building = value
+		self.build_action.target_building = value
+	
 	@property
 	def target_cell(self):
 		return self._target_cell
@@ -594,7 +510,7 @@ class Card:
 		self._health_component = None
 		self._attack_component = None
 
-		self.activated = False
+		self.activated = True
 
 		# Number of values in visibility
 		# 1 value -> the unit sees that value in all (cardinal?) directions
@@ -611,7 +527,7 @@ class Card:
 		self.queue_lane = None
 
 	def queue(self, board, cell, owner):
-		lane = cell[0]	
+		lane = cell[0]
 		active_queue = board.queued_cards[owner] # Queue of the active player
 		previous_card = active_queue[lane] # Card in the lane queue already
 
@@ -620,15 +536,12 @@ class Card:
 			previous_card.unqueue()
 
 		active_queue[lane] = self
-		print(self.name, ' board set to ', board)
 		self.board = board
 		self.owner = owner
 		self.queue_lane = lane
 
 	def unqueue(self):
-		print(self.name, '.board = ', self.board)
-		print_callstack()
-		print('***')
+		self.board.queued_cards[self.owner][self.queue_lane] = None
 		self.board.field.active_hand.add_card(name=self.name)
 
 	def place_queued(self):
@@ -646,12 +559,11 @@ class Card:
 			self.queue_lane = None
 			self.activated = True
 
-
-	def place(self, board, sub_board, cell, owner):
+	def place(self, board, cell, owner):
 		self.cell = cell
 		self.board = board
 		self.owner = owner
-		sub_board[cell] = self
+		self.sub_board[cell] = self
 
 		self.activated = True
 
@@ -723,7 +635,7 @@ class Card:
 	def move_to_hand(self, hand):
 		if isinstance(self.sub_board, np.ndarray) == False:
 			print('sub_board not set')
-			print_callstack()
+			util.print_callstack()
 			return
 
 		if self.board == True:
@@ -756,24 +668,24 @@ class Card:
 		return self._board_surface
 
 	def _generate_hand_surface(self):
-		bg_color = dark_grey
+		bg_color = c.dark_grey
 		# if self.owner == 0:
-		# 	bg_color = dark_red
+		# 	bg_color = c.dark_red
 		# elif self.owner == 1:
-		# 	bg_color = dark_blue
+		# 	bg_color = c.dark_blue
 
 		self._hand_surface = pg.Surface(hand_card_size)
 
 		pg.draw.rect(self.hand_surface, bg_color, ((0,0), hand_card_size))
-		pg.draw.rect(self.hand_surface, light_grey, ((0,0), hand_card_size), 1)
-		title_surface = card_text_sm.render(self.name, True, white)
+		pg.draw.rect(self.hand_surface, c.light_grey, ((0,0), hand_card_size), 1)
+		title_surface = card_text_sm.render(self.name, True, c.white)
 		self.hand_surface.blit(title_surface, (5,0))
-		cost_surface = card_text_lg.render(str(self.cost), True, light_grey)
-		draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
+		cost_surface = card_text_lg.render(str(self.cost), True, c.light_grey)
+		draw.draw_surface_aligned(target=self.hand_surface, source=cost_surface, pos=self.hand_surface.get_rect().center, align=('center','center'))
 
 		if self._health_component != None:
 			# Draw health bar
-			draw_surface_aligned(	target=self.hand_surface,
+			draw.draw_surface_aligned(	target=self.hand_surface,
 									source=self._health_component.health_bar.surface,
 									pos=hand_card_size,
 									align=('right','down'),
@@ -803,7 +715,7 @@ class Card:
 	def board(self, value):
 		if self.name == 'Scout':
 			print('board for ', self.name, ' set to ', value)
-			print_callstack()
+			util.print_callstack()
 			print('***')
 		self._board = value
 	
@@ -835,8 +747,10 @@ class Card:
 		if location == 'hand':
 			screen.blit(self.hand_surface, pos)
 			if hover:
-				pg.draw.rect(screen, gold, (pos, self.hand_surface.get_size()), 3)
-		elif location == 'board' or location == 'board_hover':
+				pg.draw.rect(screen, c.gold, (pos, self.hand_surface.get_size()), 3)
+		elif location == 'board' or location == 'board_hover' and self.activated == True:
+			screen.blit(self.board_surface, pos)
+		elif location == 'queue':
 			screen.blit(self.board_surface, pos)
 
 class BuildingCard(Card):
@@ -850,6 +764,9 @@ class BuildingCard(Card):
 
 		self.enter_fns = enter_fns
 
+	# def place(self, board, sub_board, cell, owner):
+	# 	Card.place(self=self, board=board, sub_board=self.sub_board, cell=cell, owner=owner)
+
 	def queue(self, board, cell, owner):
 		lane = cell[0]
 		active_queue = board.queued_cards[owner] # Queue of the active player
@@ -861,13 +778,13 @@ class BuildingCard(Card):
 
 		drone = board.field.game.card_pool.get_card_by_name(name='Drone')
 		drone.target_cell = cell
-		print('board=', board)
+		drone.target_building = self
 		drone.queue(board=board, cell=cell, owner=owner)
-		self.place(board=board, cell=cell, owner=owner)
-		self.activated = False
 
-	def place(self, board, cell, owner):
-		Card.place(self=self, board=board, sub_board=board.building_cards, cell=cell, owner=owner)
+		self.cell = cell
+		self.board = board
+		self.owner = owner
+		#self.sub_board[cell] = self
 		self.activated = False
 
 	# TODO: Add network sync; the problem is I've been relying on board.place_card, but this doesn't go through that method
@@ -898,11 +815,11 @@ class BuildingCard(Card):
 		Card._generate_board_surface(self)
 
 		if self.activated == False:
-			pending_text_surface = card_text_v_sm.render('Pending', True, green)
+			pending_text_surface = card_text_v_sm.render('Pending', True, c.green)
 			pending_surface = pg.Surface((self._board_surface.get_width(), pending_text_surface.get_height()))
 			pending_surface.blit(pending_text_surface, (pending_surface.get_rect().centerx - pending_text_surface.get_width()//2,0))
 
-			pg.draw.rect(pending_surface, green, pending_surface.get_rect(), 1)
+			pg.draw.rect(pending_surface, c.green, pending_surface.get_rect(), 1)
 
 			# a surface that fades out the normal parts of the card while it is pending
 			black_out_surface = pg.Surface(self._board_surface.get_size())
@@ -929,10 +846,7 @@ class CreatureCard(Card):
 		self.current_action = 'AM'
 
 		self.base_power = base_power
-		self._health_component = HealthComponent(max_health=max_health, health=health)
-
-	def place(self, board, cell, owner):
-		Card.place(self=self, board=board, sub_board=board.unit_cards, cell=cell, owner=owner)
+		self._health_component = HealthComponent(max_health=max_health, health=health)   
 
 	# Returns the cell directly in front of the card (assuming it's facing towards the enemy)
 	def get_front_cell(self):
@@ -986,16 +900,16 @@ class CreatureCard(Card):
 		Card._generate_hand_surface(self)
 
 		# Draw power value
-		power_text = card_text_sm.render(str(self.power), True, green)
+		power_text = card_text_sm.render(str(self.power), True, c.green)
 		bottomleft = self.hand_surface.get_rect().bottomleft
-		draw_surface_aligned(	target=self.hand_surface, 
+		draw.draw_surface_aligned(	target=self.hand_surface, 
 								source=power_text,
 								pos=bottomleft,
 								align=('left','down'),
 								offset=(6,-4))
 
-		health_text = card_text_med.render(str(self.health), True, red)
-		draw_surface_aligned(	target=self.hand_surface,
+		health_text = card_text_med.render(str(self.health), True, c.red)
+		draw.draw_surface_aligned(	target=self.hand_surface,
 								source=health_text,
 								pos=hand_card_size,
 								align=('right','down'),
@@ -1026,7 +940,7 @@ class CreatureCard(Card):
 
 	def clone(self):
 		print(self.name, ' cloned')
-		print_callstack()
+		util.print_callstack()
 		print('')
 		return CreatureCard(name = self.name,
 							cost = self.cost,
@@ -1049,9 +963,21 @@ class BuilderCard(CreatureCard):
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
 	def unqueue(self):
+		print('*target_cell =', self.target_cell)
+		util.print_callstack()
+		self.board.queued_cards[self.owner][self.queue_lane] = None
+		self.board.field.active_hand.add_card(name=self.board.building_cards[self.target_cell].name)
 		if self.target_cell != None:
 			self.board.building_cards[self.target_cell] = None
+	
+	@property
+	def target_building(self):
+		return self.active_actions['MB'].target_building
 
+	@target_building.setter
+	def target_building(self, value):
+		self.active_actions['MB'].target_building = value
+	
 	@property
 	def target_cell(self):
 		return self.active_actions['MB'].target_cell
@@ -1077,6 +1003,17 @@ class BuilderCard(CreatureCard):
 			self.pos = None
 
 			# Builder card should just be deleted, and not returned to hand
+
+	def draw(self, pos, location, hover=False):
+		# Draw target pending building
+		if location == 'board' or location == 'queue':
+			building_pos = self.board.grid.get_cell_pos(cell=self.target_cell, align=('center','up'))
+			building_pos[0] -= board_card_size[0]//2
+
+			self.target_building.draw(pos=building_pos, location='board')
+
+		Card.draw(self=self, pos=pos, location=location, hover=hover)
+
 
 	def clone(self):
 		return BuilderCard(	name = self.name,
@@ -1127,7 +1064,7 @@ class Hand:
 			for _ in range(count):
 				self.cards.append(card)
 		else:
-			print_callstack()
+			util.print_callstack()
 			print("Tried to add non-existent card to hand.")
 
 	def pop_card(self, index):
@@ -1206,8 +1143,8 @@ class TurnDisplay:
 		self.phase_active_texts = []
 
 		for name in self.phase.names:
-			self.phase_texts.append(self.font.render(name, True, white))
-			self.phase_active_texts.append(self.font.render(name, True, green))
+			self.phase_texts.append(self.font.render(name, True, c.white))
+			self.phase_active_texts.append(self.font.render(name, True, c.green))
 
 	def draw(self, pos):
 		line_spacing = self.font.get_linesize()
@@ -1228,754 +1165,10 @@ class InputMap:
 
 Input = namedtuple('Input', 'key mouse_button type', defaults=(None,None,'press'))
 
-class UI_Element:
-	def __init__(self, parent_container=None):
-		self.parent_container = parent_container
-		self.events = []
-	def get_event(self):
-		if len(self.events) > 0:
-			return self.events.pop(0)
-	def any_key_pressed(self, key, mod, unicode_key):
-		pass
-	def left_mouse_pressed(self, mouse_pos):
-		pass
-	def left_mouse_released(self, mouse_pos):
-		pass
-	def update(self, dt, mouse_pos):
-		pass
-
-class UI_Container:
-	def __init__(self):
-		self.ui_elements = []
-		self.ui_group_parent = None
-		self.focused_element = None
-
-	def __iter__(self):
-		return iter(self.ui_elements)
-
-	def add_ui_element(self, element):
-		self.ui_elements.append(element)
-		element.parent_container = self
-		if self.focused_element == None:
-			self.focused_element = element
-
-	def focus_ui_element(self, target):
-		for e in self.ui_elements:
-			if e == target:
-				self.focused_element = target
-				if self.ui_group_parent:
-					self.ui_group_parent.focus_ui_element(target)
-				return True
-		return False
-		# If the element isn't in this container, ignore the focus request
-
-	# Returns True if there is no focused element upon return,
-	# Returns False if there is still a focused element upon return
-	def unfocus_ui_element(self, target=None):
-		if target == None:
-			self.focused_element = None
-		else:
-			if target == self.focused_element:
-				self.focused_element = None
-
-		for e in self.ui_elements:
-			if isinstance(e, UI_Container):
-				e.unfocus_ui_element(target)
-
-	def any_key_pressed(self, key, mod, unicode_key):
-		if self.focused_element:
-			self.focused_element.any_key_pressed(key, mod, unicode_key)
-
-	def left_mouse_pressed(self, mouse_pos):
-		for e in self.ui_elements:
-			e.left_mouse_pressed(mouse_pos)
-
-	def left_mouse_released(self, mouse_pos):
-		if self.focused_element:
-			self.focused_element.left_mouse_released(mouse_pos)
-
-	def update(self, dt, mouse_pos):
-		for e in self.ui_elements:
-			e.update(dt, mouse_pos)
-
-	def draw(self):
-		for e in self.ui_elements:
-			e.draw()
-			if e == self.focused_element:
-				pass#pg.draw.circle(screen, pink, e.pos, 10)
-
-# Represents a group of individual UI_Containers that are displayed
-# on the screen at once and interact smoothly between each other
-class UI_Group:
-	def __init__(self, ui_containers):
-		self.ui_containers = ui_containers
-		self.focused_container = None
-		for container in self.ui_containers:
-			container.unfocus_ui_element()
-			container.ui_group_parent = self
-
-	def __iter__(self):
-		ui_elements = []
-		for container in self.ui_containers:
-			for e in container:
-				ui_elements.append(e)
-
-		return iter(ui_elements)
-
-	def focus_ui_element(self, target):
-		for container in self.ui_containers:
-			for e in container:
-				if e == target:
-					container.focused_element = target
-					self.focused_container = container
-		for container in self.ui_containers:
-			if container != self.focused_container:
-				container.unfocus_ui_element()
-
-	def unfocus_ui_element(self, target=None):
-		for container in self.ui_containers:
-			container.unfocus_ui_element(target)
-		self.focused_container = None
-
-
-	def any_key_pressed(self, key, mod, unicode_key):
-		for container in self.ui_containers:
-			container.any_key_pressed(key, mod, unicode_key)
-
-	def left_mouse_pressed(self, mouse_pos):
-		for container in self.ui_containers:
-			container.left_mouse_pressed(mouse_pos)
-
-	def left_mouse_released(self, mouse_pos):
-		for container in self.ui_containers:
-			container.left_mouse_released(mouse_pos)
-
-	def update(self, dt, mouse_pos):
-		for container in self.ui_containers:
-			container.update(dt, mouse_pos)
-
-	def draw(self):
-		for container in self.ui_containers:
-			container.draw()
-
-class Label(UI_Element):
-	def __init__(self, pos, font, align=('left','top'), text_color=white, text='', parent_container=None):
-		UI_Element.__init__(self, parent_container)
-		self.pos = pos
-		self.font = font
-		self.align = align
-		self.text_color = text_color
-		self.text = text
-
-		self._generate_surface()
-
-	@property
-	def text(self):
-		return self._text
-
-	@text.setter
-	def text(self, new_text):
-		self._text = new_text
-		self._generate_surface()
-	
-
-	def _generate_surface(self):
-		self.surface = self.font.render(self.text, True, self.text_color)
-
-	def draw(self):
-		draw_surface_aligned(target=screen, source=self.surface, pos=self.pos, align=self.align)
-
-
-class Button(UI_Element):
-	def __init__(	self,
-					pos, font,
-					text,
-					align=('left','top'),
-					bg_colors={'default': black, 'hovered': dark_grey, 'pressed': green},
-					text_colors={'default': white, 'hovered': white, 'pressed': white},
-					padding=(10,0),
-					parent_container=None):
-		UI_Element.__init__(self, parent_container)
-		self.pos = pos
-		self.font = font
-		self.text = text
-		self.padding = padding
-		self.align = align
-		self.bg_colors = bg_colors
-		self.text_colors = text_colors
-
-		self.width = self.font.size(text)[0] + self.padding[0]*2
-		self.height = self.font.size(text)[1] + self.padding[1]*2
-
-		self._hovered = False
-		self._pressed = False
-		self.button_was_pressed = False
-
-		self._generate_surfaces()
-
-	@property
-	def size(self):
-		return (self.width, self.height)
-
-	@property
-	def rect(self):
-		offset_x, offset_y = 0, 0
-		if self.align[0] == 'center':
-			offset_x -= self.width//2
-		elif self.align[0] == 'right':
-			offset_x -= self.width
-
-		if self.align[1] == 'center':
-			offset_y -= self.height//2
-		elif self.align[1] == 'down':
-			offset_y -= self.height
-
-		return pg.Rect((self.pos[0]+offset_x, self.pos[1]+offset_y), self.size)
-
-	def _generate_surfaces(self):
-		self.surfaces = {	'default': pg.Surface(self.size),
-							'hovered': pg.Surface(self.size),
-							'pressed': pg.Surface(self.size)}
-
-		for key, surface in self.surfaces.items():
-			pg.draw.rect(surface, self.bg_colors[key], ((0,0),self.size))
-			pg.draw.rect(surface, white, ((0,0),self.size),1)
-			surface.blit(self.font.render(self.text, True, self.text_colors[key]), self.padding)
-
-	@property
-	def hovered(self):
-		return self._hovered
-
-	@hovered.setter
-	def hovered(self, hovered):
-		self._hovered = hovered
-
-	@property
-	def pressed(self):
-		return self._pressed
-
-	@pressed.setter
-	def pressed(self, pressed):
-		self._pressed = pressed
-	
-	def left_mouse_pressed(self, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			self.pressed = True
-			if self.parent_container:
-				self.parent_container.focus_ui_element(self)
-
-	def left_mouse_released(self, mouse_pos):
-		if self.pressed == True and self.rect.collidepoint(mouse_pos):
-			self.button_was_pressed = True
-		self.pressed = False
-		if self.parent_container:
-			self.parent_container.unfocus_ui_element(self)
-
-	def clear_pressed(self):
-		self.button_was_pressed = False
-
-	def update(self, dt, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			self.hovered = True
-		else:
-			self.hovered = False
-			self.pressed = False
-
-	@property
-	def state(self):
-		_state = 'default'
-		if self.pressed:
-			_state = 'pressed'
-		elif self.hovered:
-			_state = 'hovered'
-
-		return _state
-
-	def draw(self):
-		draw_offset = draw_surface_aligned(	target=screen,
-											source=self.surfaces[self.state],
-											pos=self.pos,
-											align=self.align)
-
-class TextEntry(UI_Element):
-	def __init__(	self,
-					pos, font,
-					align=('left','top'), text_align=None,
-					width=None,
-					type='ip',
-					label = '',
-					text_cursor_scale=0.75, cursor_blink_time=750,
-					padding=(5,0),
-					alpha=255,
-					default_text='',
-					parent_container=None):
-		UI_Element.__init__(self, parent_container)
-		self.pos = pos
-		self.width = width
-		self.type = type
-		self.align = align
-		self.text_align = text_align
-		self.font = font
-		self.alpha = alpha
-		self.text_cursor_scale = text_cursor_scale
-		self.padding = padding
-		self.text = default_text
-		self.label = label
-
-		if self.width == None:
-			if self.type == 'ip':
-				self.width = self.font.size('000.000.000.000')[0] + self.padding[0]*2
-			elif self.type == 'port':
-				self.width = self.font.size('00000')[0] + self.padding[0]*2
-			else:
-				self.width = 200
-
-		self.size = (self.width, self.height)
-		self.rect = pg.Rect(pos,self.size)
-
-		self.selected_text_indices = None
-		self.select_mode = False
-		self.select_start_index = None
-
-		self.char_positions = []
-		self._calculate_char_positions()
-
-		self.selected = False
-		self.cursor_pos = 0
-		self.cursor_blink_time = cursor_blink_time
-		self.cursor_timer = 0
-		self.cursor_visible = True
-
-		self._generate_surfaces()
-
-	@property
-	def height(self):
-		return self._calculate_height()
-	
-	def _calculate_char_positions(self, pos=None):
-		char_positions = []
-		if pos == None: # Recalculate positions for the whole string
-			for i in range(0, len(self.text)+1):
-				sub_string = self.text[0:i]
-				sub_string_width, _ = self.font.size(sub_string)
-				char_positions.append(sub_string_width)
-		elif pos >= 0:
-			char_positions = self.char_positions[:pos]
-			for i in range(pos, len(self.text)+1):
-				sub_string = self.text[0:i]
-				sub_string_width, _ = self.font.size(sub_string)
-				char_positions.append(sub_string_width)
-
-		self.char_positions = char_positions # char_positions[n] is the position of the leftmost pixel of the nth character in the text
-		# TODO: Only update the ones past pos for center_positions
-		# positon_bounds[n] gives the range for when a click inside the textbox should place the cursor in the nth position (this range is between)
-		self.position_bounds = []
-		current_pos = 0
-		for consecutive_positions in zip(self.char_positions[:], self.char_positions[1:]):
-			char_center = (consecutive_positions[0]+consecutive_positions[1])//2 # Finds the center of the nth character
-			self.position_bounds.append((current_pos, char_center))
-			current_pos = char_center + 1
-
-		self.position_bounds.append((current_pos, self.rect.width))
-
-		# print(self.char_positions)
-		# print(list(zip(self.char_positions[:], self.char_positions[1:])))
-
-	def _calculate_height(self):
-		test_string = ''
-		for i in range(32,127):
-			test_string += chr(i) # String containing all 'printable' ASCII characters (that we care about)
-
-		return self.font.size(test_string)[1]
-
-	def _generate_surfaces(self):
-		self._generate_box_surface()
-		self._generate_label_surface()
-		self._generate_text_surface()
-
-	def _generate_box_surface(self):
-		self.box_surface = pg.Surface(self.size)
-
-		pg.draw.rect(self.box_surface, dark_grey, ((0,0),self.size))
-		pg.draw.rect(self.box_surface, white, ((0,0),self.size), 1)
-
-		self.box_surface.set_alpha(self.alpha)
-
-	def _generate_label_surface(self):
-		self.label_surface = self.font.render(self.label, True, grey)
-		self.label_surface.set_alpha(self.alpha)
-
-	def _generate_text_surface(self):
-		self.text_surface = self.font.render(self.text, True, light_grey)
-		self.text_selected_surface = self.font.render(self.text, True, black)
-
-		self.text_surface.set_alpha(self.alpha)
-		self.text_selected_surface.set_alpha(self.alpha)
-
-	@property
-	def cursor_pos(self):
-		return self._cursor_pos
-
-	@cursor_pos.setter
-	def cursor_pos(self, cursor_pos):
-		if cursor_pos < 0:
-			cursor_pos = 0
-		elif cursor_pos > len(self.text):
-			cursor_pos = len(self.text)
-
-		self._cursor_pos = cursor_pos
-		self.cursor_visible = True
-		self.cursor_timer = 0
-		
-	def clear_text(self):
-		self.text = ''
-		self.selected_text_indices = None
-		self.select_mode = False
-		self.select_start_index = None
-		self.cursor_pos = 0
-		self.cursor_timer = 0
-		self.cursor_visible = True
-
-		self._calculate_char_positions()
-		self._generate_surfaces()
-
-	# unselect text and place cursor at cursor_pos
-	def _unselect(self, cursor_pos):
-		self.cursor_pos = cursor_pos
-		self.select_mode = False
-		self.selected_text_indices = None
-		self.select_start_index = None
-
-	def delete_selected(self):
-		left = self.text[:self.selected_text_indices[0]] # left side of selected text
-		right = self.text[self.selected_text_indices[1]:] # right ..
-		self.text = left + right
-		self._unselect(cursor_pos = self.selected_text_indices[0])
-
-	def any_key_pressed(self, key, mod, unicode_key):
-		if self.selected == False:
-			return
-
-		if key in range(32,127): # a normal 'printable' character
-			if self.selected_text_indices != None:
-				self.cursor_pos = self.selected_text_indices[0]
-				self.delete_selected()
-
-			self.text = self.text[:self.cursor_pos] + unicode_key + self.text[self.cursor_pos:]
-			self.cursor_pos += 1
-			self._calculate_char_positions(pos = self.cursor_pos-1)
-			self._generate_text_surface()
-
-		if key == pg.K_LEFT:
-			if self.cursor_pos == 0:
-				pass
-			elif mod == pg.KMOD_LSHIFT:
-				if self.selected_text_indices == None:
-					self.selected_text_indices = (self.cursor_pos-1, self.cursor_pos)
-				else:
-					if self.cursor_pos == self.selected_text_indices[0]:
-						self.selected_text_indices = (self.selected_text_indices[0]-1, self.selected_text_indices[1])
-					elif self.cursor_pos == self.selected_text_indices[1]:
-						self.selected_text_indices = (self.selected_text_indices[0], self.selected_text_indices[1]-1)
-					else:
-						print("cursor_pos is not equal to either selected_text_index. something went wrong.")
-
-					if self.selected_text_indices[0] == self.selected_text_indices[1]:
-						self.selected_text_indices = None
-					else:
-						self.selected_text_indices = sorted(self.selected_text_indices)
-
-				self.cursor_pos -= 1
-			elif self.selected_text_indices != None:
-				self._unselect(cursor_pos=self.selected_text_indices[0])
-			else:
-				self.cursor_pos -= 1
-		elif key == pg.K_RIGHT:
-			if self.cursor_pos == len(self.text):
-				pass
-			elif mod == pg.KMOD_LSHIFT:
-				if self.selected_text_indices == None:
-					self.selected_text_indices = (self.cursor_pos, self.cursor_pos+1)
-				else:
-					if self.cursor_pos == self.selected_text_indices[0]:
-						self.selected_text_indices = (self.selected_text_indices[0]+1, self.selected_text_indices[1])
-					elif self.cursor_pos == self.selected_text_indices[1]:
-						self.selected_text_indices = (self.selected_text_indices[0], self.selected_text_indices[1]+1)
-					else:
-						print("cursor_pos is not equal to either selected_text_index. something went wrong.")
-
-					if self.selected_text_indices[0] == self.selected_text_indices[1]:
-						self.selected_text_indices = None
-					else:
-						self.selected_text_indices = sorted(self.selected_text_indices)
-
-				self.cursor_pos += 1
-			elif self.selected_text_indices != None:
-				self._unselect(cursor_pos=self.selected_text_indices[1])
-			else:
-				self.cursor_pos += 1
-		elif key == pg.K_BACKSPACE:
-			if self.selected_text_indices != None:
-				self.delete_selected()
-			elif self.cursor_pos > 0:
-				self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
-				self.cursor_pos -= 1
-
-			self._calculate_char_positions(pos=self.cursor_pos)
-			self._generate_text_surface()
-		elif key == pg.K_DELETE:
-			if self.selected_text_indices != None:
-				self.delete_selected()
-			elif self.cursor_pos < len(self.text):
-				self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos+1:]
-
-			self._calculate_char_positions(pos=self.cursor_pos)
-			self._generate_text_surface()
-
-	# Returns where the cursor should be placed for the given mouse position
-	def mouse_pos_to_cursor_index(self, mouse_pos):
-		# mouse position relative to the left side of the textbox
-		relative_x = mouse_pos[0] - self.rect.left - self.padding[0]
-
-		for i, position_bound in enumerate(self.position_bounds):
-			#print('i=%d; position_bound=%s; mouse_pos=%s; relative_x=%s`'%(i, position_bound, mouse_pos, relative_x))
-			if i == 0: # valid between -inf up to the second position_bound
-				if relative_x <= position_bound[1]:
-					return i
-			if i == len(self.position_bounds)-1: # valid between first position bound and +inf
-				if relative_x >= position_bound[0]:
-					return i
-			elif relative_x >= position_bound[0] and relative_x <= position_bound[1]:
-				return i
-
-		print('mouse_pos_to_cursor_index() failed')
-		return 0
-
-	def left_mouse_pressed(self, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			if self.parent_container:
-				self.parent_container.focus_ui_element(self)
-			self.selected = True
-
-			new_cursor_pos = self.mouse_pos_to_cursor_index(mouse_pos)
-			if new_cursor_pos:
-				self.cursor_pos = new_cursor_pos
-
-			self.select_start_index = self.cursor_pos
-			self.select_mode = True
-			self.cursor_visible = True
-			self.cursor_timer = 0
-		else:
-			if self.parent_container:
-				self.parent_container.unfocus_ui_element(self)
-			self.selected = False
-
-
-	def left_mouse_released(self, mouse_pos):
-		self.select_mode = False
-		self.select_start_index = None
-
-
-		# if self.selected_text_indices[0] == self.selected_text_indices[1]:
-		# 	self.selected_text_indices = None
-
-	def check_mouse_inside(self, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			return True
-		else:
-			return False
-
-	def update(self, dt, mouse_pos):
-		if self.selected:
-			self.cursor_timer += dt
-			if self.cursor_timer >= self.cursor_blink_time:
-				self.cursor_timer -= self.cursor_blink_time
-				self.cursor_visible = not self.cursor_visible
-
-			if self.select_mode == True:
-				mouse_index = self.mouse_pos_to_cursor_index(mouse_pos)
-				self.cursor_pos = mouse_index
-				if self.select_start_index != mouse_index:
-					self.selected_text_indices = tuple(sorted([mouse_index, self.select_start_index]))
-				else:
-					self.selected_text_indices = None
-
-
-	def _draw_cursor(self):
-		if self.cursor_visible:
-			x = self.rect.left + self.padding[0] + self.char_positions[self.cursor_pos]
-			y_padding = self.rect.height*(1 - self.text_cursor_scale)//2
-			pg.draw.line(screen, white, (x,self.rect.top+y_padding), (x,self.rect.bottom-y_padding))
-
-	def _draw_text(self):
-		# Ignores self.text_align for now
-		screen.blit(self.text_surface, (self.rect.left+self.padding[0], self.rect.top+self.padding[1]))
-		if self.selected_text_indices != None:
-			left_index = self.selected_text_indices[0]
-			right_index = self.selected_text_indices[1]
-			left = self.char_positions[left_index]
-			right = self.char_positions[right_index]
-			shifted_left = left + self.rect.left + self.padding[0]
-			shifted_right = right + self.rect.left + self.padding[0]
-
-			pg.draw.rect(screen, grey, ((shifted_left,self.rect.top),(shifted_right-shifted_left,self.rect.height)))
-			screen.blit(self.text_selected_surface, (shifted_left, self.rect.top), (left, 0, right-left, self.text_selected_surface.get_height()))
-
-	def draw(self):
-		draw_surface_aligned(	target=screen,
-								source=self.box_surface,
-								pos=self.pos,
-								align=self.align,
-								alpha=self.alpha)
-
-		draw_surface_aligned(	target=screen,
-								source=self.label_surface,
-								pos=self.pos,
-								align=('left','down'),
-								alpha=self.alpha)
-
-		self._draw_text()
-
-		if self.selected:
-			self._draw_cursor()
-
-class ListMenu(UI_Element):
-	def __init__(self, items, pos, align, text_align, font, selected_font, item_spacing=4, selected=0, parent_container=None):
-		UI_Element.__init__(self, parent_container)
-		self.items = items
-		self.pos = pos
-		self.align = align
-		self.text_align = text_align
-		self.font = font
-		self.selected_font = selected_font
-		self.item_spacing = item_spacing
-		self.selected = selected
-		self.confirmed_index = None
-
-	def _generate_surfaces(self):
-		self.item_surfaces = []
-		self.selected_item_surfaces = []
-
-		for item in self.items:
-			self.item_surfaces.append(self.font.render(item, True, light_grey))
-			self.selected_item_surfaces.append(self.selected_font.render(item, True, gold))
-
-	@property
-	def rect(self):
-		current_height = 0
-		max_width = 0
-		for item_index, _ in enumerate(self.items):
-			item_surface = self.get_item_surface(item_index)
-			current_height += item_surface.get_height()
-			max_width = max(max_width, item_surface.get_width())
-
-		return pg.Rect(self.pos, (max_width, current_height))
-
-	@property
-	def confirmed_item_text(self):
-		if self.confirmed_index != None:
-			return self.items[self.confirmed_index]
-		else:
-			return ''
-	
-
-	@property
-	def selected(self):
-		return self._selected
-
-	@selected.setter
-	def selected(self, selected):
-		self._selected = selected
-		self._generate_surfaces()
-
-	def clear_confirmed(self):
-		self.confirmed_index = None
-
-	def _move_cursor_up(self):
-		self.selected -= 1
-		if self.selected < 0:
-			self.selected = len(self.items)-1
-
-	def _move_cursor_down(self):
-		self.selected += 1
-		if self.selected >= len(self.items):
-			self.selected = 0
-
-	def get_selected_item(self):
-		return self.items[self.selected]
-
-	# Menu items can be selected but not hovered. Sometimes, when clicking,
-	# you may not want to activate the item unless it's still being hovered
-	# (i.e., the mouse is still over the menu element)
-	def check_mouse_inside(self, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			return True
-		else:
-			return False
-
-	def get_item_surface(self, item_index):
-		if item_index == self.selected:
-			return self.selected_item_surfaces[item_index]
-		else:
-			return self.item_surfaces[item_index]
-
-	def any_key_pressed(self, key, mod, unicode_key):
-		if key==pg.K_UP or key==pg.K_w or key==pg.K_LEFT or key==pg.K_a:
-			self._move_cursor_up()
-		elif key==pg.K_DOWN or key==pg.K_s or key==pg.K_RIGHT or key==pg.K_d:
-			self._move_cursor_down()
-		elif key==pg.K_RETURN or key==pg.K_SPACE:
-			self.confirmed_index = self.selected
-
-	def get_hovered_item(self, mouse_pos):
-		current_y = 0
-		mouse_relative_pos = (mouse_pos[0] - self.pos[0], mouse_pos[1] - self.pos[1])
-		for item_index, _ in enumerate(self.items):
-			item_surface = self.get_item_surface(item_index)
-			# x bounds are already satisfied because of the self.rect.collidepoint() check above
-			if mouse_relative_pos[1] >= current_y and mouse_relative_pos[1] < current_y+item_surface.get_height(): # y bounds
-				return item_index
-			current_y += item_surface.get_height()
-
-	def left_mouse_pressed(self, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			self.parent_container.focus_ui_element(self)
-
-			hovered = self.get_hovered_item(mouse_pos)
-			if hovered != None:
-				self.selected = hovered
-
-			self.confirmed_index = self.selected
-
-
-	def update(self, dt, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			self.parent_container.focus_ui_element(self)
-
-			hovered = self.get_hovered_item(mouse_pos)
-			if hovered != None:
-				self.selected = hovered
-
-
-	def draw(self):
-		current_y = 0
-		for item_index, _ in enumerate(self.items):
-			item_surface = self.get_item_surface(item_index)
-			screen.blit(item_surface, (self.pos[0], self.pos[0]+current_y))
-			current_y += item_surface.get_height()
-
-		# draw_surface_aligned(	target=screen,
-		# 						source=self.surface,
-		# 						pos=self.pos,
-		# 						align=self.align)
-		# for item_rect in self.item_rects:
-		# 	pg.draw.rect(screen, green, item_rect, 1)
-
-
 class GameState:
 	def __init__(self, game):
 		self.game = game
-		self.ui_container = UI_Container()
+		self.ui_container = UI.Container()
 		self.target_state = None
 	def handle_input(self, input, mouse_pos, mod=None, unicode_key=None):
 		if input in self.input_map:
@@ -2021,17 +1214,17 @@ class MainMenu(GameState):
 		}
 
 
-		self.list_menu = ListMenu(	items=('Start SP Game', 'Start MP Game', 'Host', 'Connect', 'Exit'),
+		self.list_menu = UI.ListMenu(	items=('Start SP Game', 'Start MP Game', 'Host', 'Connect', 'Exit'),
 									pos=(300,300),
 									align=('center','center'),
 									text_align=('center'),
 									font=main_menu_font,
 									selected_font=main_menu_selected_font)
 
-		self.ui_container.add_ui_element(self.list_menu)
+		self.ui_container.add_element(self.list_menu)
 
 	def enter(self):
-		self.ui_container.focus_ui_element(self.list_menu)
+		self.ui_container.focus_element(self.list_menu)
 
 	def update(self, dt, mouse_pos):
 		if self.list_menu.confirmed_index != None:
@@ -2053,7 +1246,7 @@ class MainMenu(GameState):
 		self.list_menu.clear_confirmed()
 
 	def draw(self):
-		pass#UI_Container.draw(self)
+		pass#UI.Container.draw(self)
 
 	# def activate_menu(self):
 	# 	selected = self.list_menu.get_selected_item()
@@ -2084,23 +1277,23 @@ class HostMenu(GameState):
 			Input(key=pg.K_RETURN): lambda _: self._start_host()
 		}		
 
-		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
+		self.port_textentry = UI.TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
 										type='port',
 										font=main_menu_font_med,
 										label='Port',
 										default_text='4141')
 
-		self.host_button = Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
+		self.host_button = UI.Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
 									font=main_menu_font_med,
 									text='Host')
 
-		self.disconnect_button = Button(pos=(screen_size[0]//2-100,screen_size[1]//2+250),
+		self.disconnect_button = UI.Button(pos=(screen_size[0]//2-100,screen_size[1]//2+250),
 										font=main_menu_font_med,
 										text='Disconnect')
 
-		self.ui_container.add_ui_element(self.port_textentry)
-		self.ui_container.add_ui_element(self.host_button)
-		self.ui_container.add_ui_element(self.disconnect_button)
+		self.ui_container.add_element(self.port_textentry)
+		self.ui_container.add_element(self.host_button)
+		self.ui_container.add_element(self.disconnect_button)
 
 	def _start_host(self):
 		try:
@@ -2136,25 +1329,25 @@ class ConnectMenu(GameState):
 			Input(key=pg.K_RETURN): lambda _: self._submit()
 		}
 
-		self.ip_textentry = TextEntry(	pos=(screen_size[0]//2-100,screen_size[1]//2),
+		self.ip_textentry = UI.TextEntry(	pos=(screen_size[0]//2-100,screen_size[1]//2),
 										type='ip',
 										font=main_menu_font_med,
 										label='IP Address',
 										default_text='localhost')
 
-		self.port_textentry = TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
+		self.port_textentry = UI.TextEntry(pos=(screen_size[0]//2-100,screen_size[1]//2+100),
 										type='port',
 										font=main_menu_font_med,
 										label='Port',
 										default_text='4141')
 
-		self.connect_button = Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
+		self.connect_button = UI.Button(	pos=(screen_size[0]//2-100,screen_size[1]//2+200),
 										font=main_menu_font_med,
 										text='Connect')
 
-		self.ui_container.add_ui_element(self.ip_textentry)
-		self.ui_container.add_ui_element(self.port_textentry)
-		self.ui_container.add_ui_element(self.connect_button)
+		self.ui_container.add_element(self.ip_textentry)
+		self.ui_container.add_element(self.port_textentry)
+		self.ui_container.add_element(self.connect_button)
 
 		self.sel = None
 
@@ -2172,37 +1365,6 @@ class ConnectMenu(GameState):
 			self._submit()
 			self.connect_button.clear_pressed()
 
-def clamp(value, min_value, max_value):
-	clamped_value = value
-	if value < min_value:
-		clamped_value = min_value
-	elif value > max_value:
-		clamped_value = max_value
-
-	return clamped_value
-
-# Scales color towards (0,0,0), where amount is between 0 and 1 (1 taking it all the way to black)
-def darken_color(color, amount):
-	try:
-		new_color = list(color)
-		for i, channel in enumerate(new_color):
-			new_color[i] = clamp(channel*(1-amount), 0, 255)
-		return new_color
-	except:
-		print("Failed to darken color.")
-		return color
-
-# Scales color towards (0,0,0), where amount is between 0 and 1 (1 takes it all the way to white)
-def lighten_color(color, amount):
-	try:
-		new_color = list(color)
-		for i, channel in enumerate(new_color):
-			new_color[i] = clamp(channel + amount*(255-channel), 0, 255)
-		return new_color
-	except:
-		print("Failed to darken color.")
-		return color
-
 class Field(GameState):
 	def __init__(self, game, player_number, game_type):
 		GameState.__init__(self, game)
@@ -2215,9 +1377,10 @@ class Field(GameState):
 		for _, hand in enumerate(self.hands):
 			hand.add_card('Goblin', 1)
 			hand.add_card('Elf', 1)
-			hand.add_card('Blacksmith', 1)
+			hand.add_card('Blacksmith', 2)
 			hand.add_card('Satellite', 1)
-			hand.add_card('Scout', 2)
+			hand.add_card('Scout', 1)
+			hand.add_card('Tower', 2)
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 
@@ -2237,7 +1400,7 @@ class Field(GameState):
 
 		self.player_count = 2
 
-		self.turn_button = Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
+		self.turn_button = UI.Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
 									align=('right','up'),
 									font=ui_font,
 									text="End Turn",
@@ -2245,26 +1408,26 @@ class Field(GameState):
 
 		if player_number == 0:
 			self.player_health_labels = [
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=(10,-30)),
+			UI.Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=(10,-30)),
 					font=ui_font,
 					text='Player 0: %s'%self.player_healths[0]),
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=(10,0)),
+			UI.Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=(10,0)),
 					font=ui_font,
 					text='Player 1: %s'%self.player_healths[1])
 			]
 		elif player_number == 1:
 			self.player_health_labels = [
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=(10,0)),
+			UI.Label(	pos=self.board.grid.get_grid_pos(align=('right','up'), offset=(10,0)),
 					font=ui_font,
 					text='Player 0: %s'%self.player_healths[0]),
-			Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=(10,-50)),
+			UI.Label(	pos=self.board.grid.get_grid_pos(align=('right','down'), offset=(10,-50)),
 					font=ui_font,
 					text='Player 1: %s'%self.player_healths[1])
 			]
 
-		self.ui_container.add_ui_element(self.turn_button)
+		self.ui_container.add_element(self.turn_button)
 		for label in self.player_health_labels:
-			self.ui_container.add_ui_element(label)
+			self.ui_container.add_element(label)
 
 
 		self.input_map = {
@@ -2352,7 +1515,7 @@ class Field(GameState):
 			self.card_grab_point = None # Probably not necessary
 
 		# TODO: Move this to the proper place (the event queue?)
-		if self.turn_button.left_mouse_released(mouse_pos): # if button was pressed
+		if self.turn_button.left_mouse_released(mouse_pos=mouse_pos): # if button was pressed
 			if self.game_type == 'SP':
 				self._end_turn(sync=True)
 			elif self.game_type == 'MP':
@@ -2499,7 +1662,7 @@ class Field(GameState):
 
 	def _draw_action_panel(self):
 		action_panel_surface = pg.Surface(action_panel_size)
-		action_panel_surface.fill(black)
+		action_panel_surface.fill(c.black)
 
 		icon_width, icon_height = action_icon_size
 		panel_width, panel_height = action_panel_size
@@ -2514,14 +1677,14 @@ class Field(GameState):
 					col = i % panel_count_y
 
 					cell_pos = (col*icon_width, row*icon_height)
-					pg.draw.rect(action_panel_surface, dark_grey, (cell_pos, action_icon_size))
-					pg.draw.rect(action_panel_surface, light_grey, (cell_pos, action_icon_size), 1)
-					draw_surface_aligned(	target=action_panel_surface,
-											source=action_font.render(action, True, white),
+					pg.draw.rect(action_panel_surface, c.dark_grey, (cell_pos, action_icon_size))
+					pg.draw.rect(action_panel_surface, c.light_grey, (cell_pos, action_icon_size), 1)
+					draw.draw_surface_aligned(	target=action_panel_surface,
+											source=action_font.render(action, True, c.white),
 											pos=(cell_pos[0]+icon_width//2, cell_pos[1]+icon_height//2),
 											align=('center','center'))
 
-		pg.draw.rect(action_panel_surface, white, ((0,0),action_panel_size), 1)
+		pg.draw.rect(action_panel_surface, c.white, ((0,0),action_panel_size), 1)
 		screen.blit(action_panel_surface, self.action_panel_rect.topleft)
 
 	def update(self, dt, mouse_pos):
@@ -2530,16 +1693,16 @@ class Field(GameState):
 
 	def draw(self):
 		if self.player_number == 0:
-			current_player_color = red
-			other_player_color = blue
+			current_player_color = c.red
+			other_player_color = c.blue
 		elif self.player_number == 1:
-			current_player_color = blue
-			other_player_color = red
+			current_player_color = c.blue
+			other_player_color = c.red
 
 		if self.player_turn == 0:
-			active_player_color = red
+			active_player_color = c.red
 		elif self.player_turn == 1:
-			active_player_color = blue
+			active_player_color = c.blue
 
 		# Draw board
 		self.board.draw(player_perspective=self.player_number)
@@ -2549,35 +1712,35 @@ class Field(GameState):
 			if queued_card != None:
 				pos = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('center','down'))
 				pos[0] -= board_card_size[0]//2
-				queued_card.draw(pos=pos, location='board')
+				queued_card.draw(pos=pos, location='queue')
 
 		self._draw_action_panel()
 		if self.board.selected_cell != None:
 			self.board.building_cards[self.board.selected_cell]
 
-		# pg.draw.rect(self.action_panel_surface, white, ((0,0), action_panel_size), 1)
+		# pg.draw.rect(self.action_panel_surface, c.white, ((0,0), action_panel_size), 1)
 
 		# Calculate colors for card areas based on which player is active
 		if self.is_current_player_active():
-			my_card_area_color = darken_color(current_player_color,0.65)
-			other_card_area_color = dark_grey
+			my_card_area_color = c.darken_color(current_player_color,0.65)
+			other_card_area_color = c.dark_grey
 		else:
-			my_card_area_color = dark_grey
-			other_card_area_color = darken_color(other_player_color,0.65)
+			my_card_area_color = c.dark_grey
+			other_card_area_color = c.darken_color(other_player_color,0.65)
 
 		# Draw my card area
 		pg.draw.rect(	screen, my_card_area_color,
 						((0,screen_size[1]-self.hand_area_height),
 						(screen_size[0], self.hand_area_height))
 					)
-		pg.draw.line(	screen, lighten_color(my_card_area_color,0.5),
+		pg.draw.line(	screen, c.lighten_color(my_card_area_color,0.5),
 						(0,screen_size[1]-self.hand_area_height),
 						(screen_size[0],screen_size[1]-self.hand_area_height)
 					)
 		# Draw enemy card area
 		pg.draw.rect(	screen, other_card_area_color,
 						((0,0), (screen_size[0], self.hand_area_height)))
-		pg.draw.line(	screen, lighten_color(other_card_area_color,0.5),
+		pg.draw.line(	screen, c.lighten_color(other_card_area_color,0.5),
 						(0, self.hand_area_height),
 						(screen_size[0], self.hand_area_height))
 
@@ -2597,10 +1760,10 @@ class Field(GameState):
 		text_size = ui_font.size(active_player_text)
 		padded_size = (text_size[0]+2*text_h_padding, text_size[1])
 		active_player_text_surface = pg.Surface(padded_size)
-		pg.draw.rect(active_player_text_surface, white, ((0,0),(padded_size)))
+		pg.draw.rect(active_player_text_surface, c.white, ((0,0),(padded_size)))
 		active_player_text_surface.blit(ui_font.render(active_player_text, True, active_player_color), (text_h_padding,0))
 		draw_pos = (20, screen_size[1]//2)
-		offset = draw_surface_aligned(	target=screen,
+		offset = draw.draw_surface_aligned(	target=screen,
 										source=active_player_text_surface,
 										pos=draw_pos,
 										align=('left','down'))
@@ -2608,7 +1771,7 @@ class Field(GameState):
 						(	int(draw_pos[0] + offset[0] + active_player_text_surface.get_width() + 20),
 							int(draw_pos[1] + offset[1] + active_player_text_surface.get_height()//2)),
 						15)
-		pg.draw.circle(screen, white,
+		pg.draw.circle(screen, c.white,
 						(	int(draw_pos[0] + offset[0] + active_player_text_surface.get_width() + 20),
 							int(draw_pos[1] + offset[1] + active_player_text_surface.get_height()//2)),
 						15, 1)
@@ -2648,7 +1811,6 @@ class Field(GameState):
 				mouse_coords = Vec(pg.mouse.get_pos())
 				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
 			
-
 class Game:
 	def __init__(self, start_state=None):
 		self.card_pool = CardPool()
@@ -2661,6 +1823,7 @@ class Game:
 		satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0],
 												default_action='SCN',
 												active_actions={'SCN': lambda card: ScanAction})
+		tower_card_prototype = BuildingCard(name='Tower', cost=2, max_health=4, visibility=[3,0,0,0])
 
 		self.card_pool.add_card(goblin_card_prototype)
 		self.card_pool.add_card(elf_card_prototype)
@@ -2668,24 +1831,25 @@ class Game:
 		self.card_pool.add_card(drone_card_prototype)
 		self.card_pool.add_card(blacksmith_card_prototype)
 		self.card_pool.add_card(satellite_card_prototype)
+		self.card_pool.add_card(tower_card_prototype)
 
 		self.network_data_queue = []
 
-		self.connection_label = Label(	pos=(0,0),
+		self.connection_label = UI.Label(	pos=(0,0),
 										font=main_menu_font_small,
 										text='',
-										text_color=green,
+										text_color=c.green,
 										align=('left','up'))
 
-		self.chat_window = ChatWindow(	name_font=chat_name_font,
+		self.chat_window = UI.ChatWindow(	name_font=chat_name_font,
 										message_font=chat_message_font,
 										name_width=75,
 										message_width=300,
 										log_height=150)
 
-		self.ui_container = UI_Container()
-		self.ui_container.add_ui_element(self.connection_label)
-		self.ui_container.add_ui_element(self.chat_window)
+		self.ui_container = UI.Container()
+		self.ui_container.add_element(self.connection_label)
+		self.ui_container.add_element(self.chat_window)
 
 		self.input_map = {
 			Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key, mod, unicode_key),
@@ -2703,7 +1867,7 @@ class Game:
 		self.connection_role = None
 
 	def refresh_ui_group(self):
-		self.ui_group = UI_Group(ui_containers=[self.ui_container, self.state.ui_container])
+		self.ui_group = UI.Group(containers=[self.ui_container, self.state.ui_container], screen=screen)
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		self.ui_group.any_key_pressed(key, mod, unicode_key)
@@ -2821,7 +1985,6 @@ class Game:
 			if recv_data:
 				print("received", repr(recv_data), "from connection", data.connid)
 				self.process_network_data(recv_data)
-#				data.recv_total += len(recv_data)
 		elif mask & selectors.EVENT_WRITE:
 			for packet in self.network_data_queue:
 				print("sending", repr(packet), "to connection", data.connid)
@@ -2928,149 +2091,6 @@ class Game:
 
 	def draw(self):
 		self.state.draw()
-		self.ui_group.draw()
-
-def split_text(text, font, word_wrap_width):
-		lines = []
-
-		split_text = text.split(' ')
-		current_line = ''
-		for i, word in enumerate(split_text):
-			if i == 0:
-				line_width = font.size(word)[0]
-			else:
-				line_width = font.size(current_line + ' ' + word)[0]
-			if line_width >= word_wrap_width:
-				lines.append(current_line)
-				current_line = word
-			else:
-				if i == 0:
-					current_line += word
-				else:
-					current_line += ' ' + word
-
-		if len(current_line) > 0:
-			lines.append(current_line)
-
-		return lines
-
-def draw_text(text, pos, font, color=white, word_wrap=False, word_wrap_width=None):
-	if len(text) == 0:
-		line_count = 0
-	if word_wrap == False:
-		text_surface = pg.Surface(font.size(text))
-		text_surface.set_colorkey(black)
-		text_surface.fill(black)
-		text_surface.blit(font.render(text, True, color), (0,0))
-		line_count = 1
-	else:
-		line_spacing = font.get_linesize()
-		lines = split_text(text, font, word_wrap_width=word_wrap_width)
-		line_count = len(lines)
-		text_surface = pg.Surface((word_wrap_width, line_spacing*line_count))
-		text_surface.set_colorkey(black)
-		text_surface.fill(black)
-
-		for line_number, line in enumerate(lines):
-			text_surface.blit(font.render(line, True, color), (0,line_number*line_spacing))
-
-	screen.blit(text_surface, pos)
-
-	return line_count
-
-
-class ChatWindow(UI_Element):
-	def __init__(self, name_font, message_font, name_width, message_width, log_height, text_color=white, parent_container=None):
-		UI_Element.__init__(self, parent_container)
-		self.pos = (0,0)
-		self.name_font = name_font
-		self.message_font = message_font
-		self.name_width = name_width
-		self.message_width = message_width
-		self.log_height = log_height
-		self.text_color = text_color
-		self.user_color_pool = [white, grey]
-		self.colors_used = 0
-		self.user_colors = {"Offline": grey}
-		self.messages = []
-
-		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.log_height),
-									font=message_font,
-									type='chat',
-									width=message_width+name_width,
-									alpha=128)
-
-		self.ui_container = UI_Container()
-		self.ui_container.add_ui_element(self.text_entry)
-
-	@property
-	def width(self):
-		return self.name_width + self.message_width
-
-	@property
-	def height(self):
-		return self.log_height + self.text_entry.height
-	
-	@property
-	def rect(self):
-		return pg.Rect(self.pos, (self.width, self.height))
-	
-	def add_message(self, user, text):
-		message = (user, text)
-		self.messages.append(message)
-		if user not in self.user_colors:
-			self.user_colors[user] = self.user_color_pool[self.colors_used % len(self.user_color_pool)]
-			self.colors_used += 1
-
-	def any_key_pressed(self, key, mode, unicode_key):
-		self.ui_container.any_key_pressed(key, mode, unicode_key)
-		if key == pg.K_RETURN:
-			if len(self.text_entry.text) > 0:
-				self.events.append(('send chat message', self.text_entry.text))
-				self.text_entry.clear_text()
-
-	def left_mouse_pressed(self, mouse_pos):
-		if self.rect.collidepoint(mouse_pos):
-			if self.parent_container:
-				self.parent_container.focus_ui_element(self)
-		else:
-			if self.parent_container:
-				self.parent_container.unfocus_ui_element()
-
-		self.ui_container.left_mouse_pressed(mouse_pos)
-
-	def left_mouse_released(self, mouse_pos):
-		self.ui_container.left_mouse_released(mouse_pos)
-
-	def update(self, dt, mouse_pos):
-		self.ui_container.update(dt, mouse_pos)
-
-	def draw(self):
-		background_surface = pg.Surface(self.rect.size)
-		background_surface.set_alpha(128)
-		background_surface.fill(dark_grey)
-		screen.blit(background_surface, self.pos)
-
-		self.ui_container.draw()
-
-		line_spacing = self.message_font.get_linesize() + 4
-		current_line_count = 0
-
-		for message in self.messages[::-1]: # Look through messages backwards, since we only show the most recent ones
-			this_line_count = len(split_text(text=message[1], font=self.message_font, word_wrap_width=self.message_width))
-			current_line_count += this_line_count
-			draw_text(	text=message[0],
-						pos=(self.pos[0], self.pos[1] + self.log_height - current_line_count*line_spacing),
-						font=self.name_font,
-						color = self.user_colors[message[0]],
-						word_wrap = False)
-			draw_text(	text=message[1],
-						pos=(self.name_width + self.pos[0], self.pos[1] + self.log_height - current_line_count*line_spacing),
-						font = self.message_font,
-						color = lighten_color(self.user_colors[message[0]], 0.5),
-						word_wrap = True,
-						word_wrap_width = self.message_width)
-
 
 class Board:
 	def __init__(self, field, size):
@@ -3106,9 +2126,9 @@ class Board:
 	# ...
 	def get_nth_rank(self, n, player):
 		if player == 0:
-			return clamp(self.size[1]-1-n, 0, self.size[1]-1)
+			return util.clamp(self.size[1]-1-n, 0, self.size[1]-1)
 		elif player == 1:
-			return clamp(n, 0, self.size[1]-1)
+			return util.clamp(n, 0, self.size[1]-1)
 		else:
 			print("Invalid player given to get_nth_rank()")
 			return 0
@@ -3126,7 +2146,7 @@ class Board:
 				self._fow_visible_cells[player].append(cell)
 
 		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
-		transparent_cell.fill(pink)
+		transparent_cell.fill(c.pink)
 		for cell in cells:
 			if player == 1:
 				# Adjusted for player perspective
@@ -3136,7 +2156,7 @@ class Board:
 
 			cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
 			cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
-			draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
+			draw.draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
 
 	def refresh_fow(self):
 		self._generate_default_fow_surfaces()
@@ -3149,10 +2169,10 @@ class Board:
 	def _generate_default_fow_surfaces(self):
 		self.fow_surfaces = [pg.Surface((self.grid.rect.width+1, self.grid.rect.height+1)) for player in range(2)]
 		for surface in self.fow_surfaces:
-			surface.fill(black)
+			surface.fill(c.black)
 			surface.set_alpha(200)
-			# We'll draw pink squares on top of visible squares to remove the FOW
-			surface.set_colorkey(pink)
+			# We'll draw c.pink squares on top of visible squares to remove the FOW
+			surface.set_colorkey(c.pink)
 
 		# The cells that are visible by default (closest 2 ranks to your side, as of writing this comment)
 		p0_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-2,self.size[1])]
@@ -3166,7 +2186,7 @@ class Board:
 		self._fow_visible_cells[1] = p1_fow_default_visible_cells
 
 		transparent_cell = pg.Surface((self.grid.cell_size[0]+1, self.grid.cell_size[1]+1))
-		transparent_cell.fill(pink)
+		transparent_cell.fill(c.pink)
 		for player in range(2):
 			for cell in self._fow_visible_cells[player]:
 				if player == 1:
@@ -3177,7 +2197,7 @@ class Board:
 
 				cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
 				cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
-				draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
+				draw.draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
 
 	@property
 	def lane_count(self):
@@ -3327,12 +2347,12 @@ class Board:
 		# 			self.cards[cell_coord].apply_buff(power=1,max_health=1)
 
 	def draw(self, player_perspective=0):
-		self.grid.draw(grey, player_perspective=player_perspective)
+		self.grid.draw(c.grey, player_perspective=player_perspective)
 
 		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)
 		if self.selected_cell != None:
-			# Draw the green highlight around border of selected cell
-			pg.draw.rect(screen, green, self.grid.get_cell_rect(self.selected_cell), 1)
+			# Draw the c.green highlight around border of selected cell
+			pg.draw.rect(screen, c.green, self.grid.get_cell_rect(self.selected_cell), 1)
 
 		# Draw the cards in the board
 		# For each type of card (unit, building, ...) loop through all cells and draw the card
@@ -3414,7 +2434,7 @@ while True:
 	game.update(dt, pg.mouse.get_pos())
 
 	# Draw
-	screen.fill(black)
+	screen.fill(c.black)
 
 	game.draw()
 
