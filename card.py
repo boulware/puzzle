@@ -1,3 +1,4 @@
+import debug as d
 from card_actions import *
 from card_components import *
 import pygame as pg
@@ -43,6 +44,7 @@ class Card:
 
 		self.queue_lane = None
 
+	@d.info
 	def queue(self, board, cell, owner):
 		lane = cell[0]
 		active_queue = board.queued_cards[owner] # Queue of the active player
@@ -57,6 +59,7 @@ class Card:
 		self.owner = owner
 		self.queue_lane = lane
 
+	# @d.info
 	def unqueue(self):
 		self.board.queued_cards[self.owner][self.queue_lane] = None
 		self.board.field.active_hand.add_card(name=self.name)
@@ -260,7 +263,7 @@ class Card:
 			draw.screen.blit(self.hand_surface, pos)
 			if hover:
 				pg.draw.rect(draw.screen, c.gold, (pos, self.hand_surface.get_size()), 3)
-		elif location == 'board' or location == 'board_hover' and self.activated == True:
+		elif location == 'board' or location == 'board_hover':
 			draw.screen.blit(self.board_surface, pos)
 		elif location == 'queue':
 			draw.screen.blit(self.board_surface, pos)
@@ -312,7 +315,7 @@ class BuildingCard(Card):
 	def sub_board(self):
 		if self.board == None: return
 		return self.board.building_cards
-	
+
 
 	@property
 	def activated(self):
@@ -358,7 +361,7 @@ class CreatureCard(Card):
 		self.current_action = 'AM'
 
 		self.base_power = base_power
-		self._health_component = HealthComponent(max_health=max_health, health=health)   
+		self._health_component = HealthComponent(max_health=max_health, health=health)
 
 	# Returns the cell directly in front of the card (assuming it's facing towards the enemy)
 	def get_front_cell(self):
@@ -402,7 +405,7 @@ class CreatureCard(Card):
 	def sub_board(self):
 		if self.board == None: return
 		return self.board.unit_cards
-	
+
 
 	@property
 	def power(self):
@@ -414,7 +417,7 @@ class CreatureCard(Card):
 		# Draw power value
 		power_text = fonts.card_text_sm.render(str(self.power), True, c.green)
 		bottomleft = self.hand_surface.get_rect().bottomleft
-		draw.draw_surface_aligned(	target=self.hand_surface, 
+		draw.draw_surface_aligned(	target=self.hand_surface,
 								source=power_text,
 								pos=bottomleft,
 								align=('left','down'),
@@ -462,7 +465,7 @@ class CreatureCard(Card):
 class BuilderCard(CreatureCard):
 	def __init__(self, name, cost, base_power, max_health, visibility, health=None):
 		CreatureCard.__init__(	self=self, name=name, cost=cost,
-								base_power=base_power, max_health=max_health, 
+								base_power=base_power, max_health=max_health,
 								visibility=visibility, health=health)
 
 		self.active_actions.update({'MB': MoveBuildAction(card=self)})
@@ -472,13 +475,9 @@ class BuilderCard(CreatureCard):
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
 	def unqueue(self):
-		print('*target_cell =', self.target_cell)
-		d.print_callstack()
 		self.board.queued_cards[self.owner][self.queue_lane] = None
-		self.board.field.active_hand.add_card(name=self.board.building_cards[self.target_cell].name)
-		if self.target_cell != None:
-			self.board.building_cards[self.target_cell] = None
-	
+		self.board.field.active_hand.add_card(name=self.target_building.name)
+
 	@property
 	def target_building(self):
 		return self.active_actions['MB'].target_building
@@ -486,7 +485,7 @@ class BuilderCard(CreatureCard):
 	@target_building.setter
 	def target_building(self, value):
 		self.active_actions['MB'].target_building = value
-	
+
 	@property
 	def target_cell(self):
 		return self.active_actions['MB'].target_cell
@@ -494,7 +493,7 @@ class BuilderCard(CreatureCard):
 	@target_cell.setter
 	def target_cell(self, value):
 		self.active_actions['MB'].target_cell = value
-	
+
 	def move_to_hand(self, hand):
 		if self.sub_board == None:
 			print('sub_board not set')
@@ -523,7 +522,7 @@ class BuilderCard(CreatureCard):
 
 		Card.draw(self=self, pos=pos, location=location, hover=hover)
 
-
+	@d.info
 	def clone(self):
 		return BuilderCard(	name = self.name,
 							cost = self.cost,

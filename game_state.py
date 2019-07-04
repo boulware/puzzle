@@ -1,4 +1,5 @@
 import UI
+import sys
 from input import Input
 from board import Board
 import constants as c
@@ -176,20 +177,20 @@ class ConnectMenu(GameState):
 		}
 
 		self.ip_textentry = UI.TextEntry(	pos=(c.screen_size[0]//2-100,c.screen_size[1]//2),
-										type='ip',
-										font=main_menu_font_med,
-										label='IP Address',
-										default_text='localhost')
+											type='ip',
+											font=fonts.main_menu_font_med,
+											label='IP Address',
+											default_text='localhost')
 
-		self.port_textentry = UI.TextEntry(pos=(c.screen_size[0]//2-100,c.screen_size[1]//2+100),
-										type='port',
-										font=main_menu_font_med,
-										label='Port',
-										default_text='4141')
+		self.port_textentry = UI.TextEntry(	pos=(c.screen_size[0]//2-100,c.screen_size[1]//2+100),
+											type='port',
+											font=fonts.main_menu_font_med,
+											label='Port',
+											default_text='4141')
 
 		self.connect_button = UI.Button(	pos=(c.screen_size[0]//2-100,c.screen_size[1]//2+200),
-										font=main_menu_font_med,
-										text='Connect')
+											font=fonts.main_menu_font_med,
+											text='Connect')
 
 		self.ui_container.add_element(self.ip_textentry)
 		self.ui_container.add_element(self.port_textentry)
@@ -331,6 +332,7 @@ class Field(GameState):
 			if relative_x >= 0 and relative_x < c.hand_card_size[1]:
 				if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
 					self.drag_card = self.active_hand.pop_card(clicked_card_index)
+					# d.debugger.print(values={'drag_card': self.drag_card})
 					self.card_grab_point = (relative_x,relative_y)
 
 		if self.board.grid.rect.collidepoint(mouse_pos): # mouse is hovering board
@@ -345,12 +347,13 @@ class Field(GameState):
 			return False
 
 	def left_mouse_released(self, mouse_pos):
-		if self.drag_card:
+		if self.drag_card is not None:
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
 			if self.is_current_player_active() and self.phase.name == 'Build':
 				cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
 				if cell != None:
+					# d.debugger.print(values={'drag_card': self.drag_card})
 					self.drag_card.queue(board=self.board, cell=cell, owner=self.player_number)
 					placed_in_board = True
 

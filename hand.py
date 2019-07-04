@@ -11,7 +11,7 @@ class Hand:
 			raise LookupError('Invalid hand index')
 
 		return self.cards[key]
-		
+
 	@property
 	def card_count(self):
 		return len(self.cards)
@@ -20,7 +20,7 @@ class Hand:
 		card = self.field.game.card_pool.get_card_by_name(name)
 		if card:
 			for _ in range(count):
-				self.cards.append(card)
+				self.cards.append(self.field.game.card_pool.get_card_by_name(name))
 		else:
 			d.print_callstack()
 			print("Tried to add non-existent card to hand.")

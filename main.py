@@ -14,7 +14,6 @@
 #
 # classes/types are uppercased words, unseparated: CreatureCard, Card, ...
 # capitization exceptions: acronyms/initialisms will be all uppercase
-
 import sys
 import os
 import socket
@@ -23,11 +22,12 @@ import types
 import pygame as pg
 import UI
 import constants as c
-import debug as d
 import draw
+import debug as d
 from input import Input
 from game_state import MainMenu, ConnectMenu, HostMenu, Field
 from card import BuildingCard, BuilderCard, CreatureCard
+
 from font import fonts
 from card_actions import ScanAction
 
@@ -60,7 +60,7 @@ class Game:
     """Delegates local input, frame-by-frame updates, and network input to objects in the game"""
     def __init__(self, screen, start_state=None, debug=False):
         if debug is True:
-            d.DebugUI(game=self, active=True)
+            d.debugger = d.DebugUI(game=self, active=True)
 
         self.screen = screen
 
