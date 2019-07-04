@@ -32,8 +32,10 @@ class DebugUI:
 	def __init__(self, game, active=False):
 		self.game = game
 		self.active = active
-		self.font = pg.font.Font('Montserrat-Regular.ttf', 16)
+		self.font = pg.font.Font('Montserrat-Regular.ttf', 14)
 		self.displayed_strings = []
+		from UI import TreeView
+		self.test_treeview = TreeView(pos=(0,0), font=self.font, parent_node_object=self.game)
 
 		self._hook_all()
 
@@ -103,7 +105,7 @@ class DebugUI:
 				pass#self.write(f"{self.game.state.drag_card.name}")
 
 			for card in self.game.state.active_hand:
-				self.write(f"{card.name}; board={card.board}")
+				pass#self.write(f"{card.name}; board={card.board}")
 
 	def draw(self):
 		if self.active == False: return
@@ -117,9 +119,18 @@ class DebugUI:
 			screen.blit(string_surface, (0, current_y))
 			current_y += self.font.get_linesize()
 
+		self.test_treeview.parent_node = self.game
+		self.test_treeview.draw(target=screen)
+
 	def any_key_pressed(self, key, mod, unicode_key):
+		self.test_treeview.any_key_pressed(key=key, mod=mod, unicode_key=unicode_key)
 		if key == pg.K_d and mod == pg.KMOD_LCTRL:
 			self.active = not self.active
-		if key == pg.K_p and mod == pg.KMOD_LCTRL:
+		elif key == pg.K_p and mod == pg.KMOD_LCTRL:
 			global active_print
 			active_print = not active_print
+		elif key == pg.K_t:
+			for depth_pair in self.test_treeview.current_list:
+				string = depth_pair[0]
+				depth = depth_pair[1]
+				print(Fore.RED + '>>'*depth + Fore.WHITE + ' ' + str(string))

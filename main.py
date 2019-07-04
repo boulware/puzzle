@@ -59,9 +59,6 @@ class CardPool:
 class Game:
     """Delegates local input, frame-by-frame updates, and network input to objects in the game"""
     def __init__(self, screen, start_state=None, debug=False):
-        if debug is True:
-            d.debugger = d.DebugUI(game=self, active=True)
-
         self.screen = screen
 
         self.card_pool = CardPool()
@@ -118,6 +115,9 @@ class Game:
         self.connection_role = None
         self._connected = False
         self._accepting_connections = False
+
+        if debug is True:
+            d.debugger = d.DebugUI(game=self, active=True)
 
     def refresh_ui_group(self):
         """Set the UI group to contain only the game UI container and its current state's UI container"""

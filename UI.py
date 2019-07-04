@@ -2,6 +2,7 @@ import constants as c
 import pygame as pg
 import draw
 import util
+import debug as d
 
 class Element:
 	def __init__(self, parent_container=None):
@@ -161,6 +162,114 @@ class Label(Element):
 	def draw(self, screen):
 		draw.draw_surface_aligned(target=screen, source=self.surface, pos=self.pos, align=self.align)
 
+class TreeView(Element):
+	def __init__(	self,
+					pos, font,
+					parent_node_object=dict(),
+					parent_container=None):
+		Element.__init__(self=self, parent_container=parent_container)
+		self.pos = pos
+		self.font = font
+
+		class Node:
+			def __init__(self, name, value, parent=None, expanded=False):
+				self.name = name
+				self.value = value
+				self.parent = parent
+				self.expanded = expanded
+
+				self.children = []
+
+				if parent is not None:
+					parent.add_child(self)
+
+			def add_child(self, child):
+				self.children.append(child)
+
+			def load_children(self):
+				self.children = []
+				try:
+					# If this node is an instance of an object with attributes, add nodes for each attr
+					for attr_name, attr_value in vars(self.value).items():
+						child = Node(name=attr_name, value=attr_value, parent=self)
+					return
+				except:
+					pass # Not an instance of an object
+
+				try:
+					# If this node is a list:
+					for index, value in enumerate(self.value):
+						child = Node(name=str(index), value=value, parent=self)
+				except:
+					pass # Not a list
+
+
+			def refresh_children(self):
+				for child in self.children:
+					if hasattr(self.value, child.name):
+						child.value = getattr(self.value, child.name)
+
+		self.parent_node_object = parent_node_object # Parent object, from which all branches stem
+		self.root = Node(name='Game', value=parent_node_object, expanded=True)
+		self.default_root = self.root
+		self.root.load_children()
+		self.selected_node = self.root
+
+		# Represents the current depth to which each branch (and sub-branch, sub-sub-...) is exploded
+		# This may need to keep named references, because the order of properties on an object might change over time? Not sure.
+		# Is a simple string list of each displayed item with its corresponding integer depth
+		# (contains no actual object references)
+		self.current_list = []
+
+	def _generate_current_list(self, current_node, depth=0):
+		self.current_list.append((current_node, depth))
+		if current_node.expanded is True:
+			current_node.refresh_children()
+			for child_node in current_node.children:
+				self._generate_current_list(current_node=child_node, depth=depth+1)
+
+
+	def any_key_pressed(self, key, mod, unicode_key):
+		if key == pg.K_DOWN:
+			for i, depth_pair in enumerate(self.current_list):
+				node = depth_pair[0]
+				if node == self.selected_node and i < len(self.current_list)-1:
+					self.selected_node = self.current_list[i+1][0]
+					break
+		elif key == pg.K_UP:
+			for i, depth_pair in enumerate(self.current_list):
+				node = depth_pair[0]
+				if node == self.selected_node and i > 0:
+					self.selected_node = self.current_list[i-1][0]
+					break
+		elif key == pg.K_RETURN:
+			if self.selected_node is not None:
+				self.selected_node.load_children()
+				self.selected_node.expanded = not self.selected_node.expanded
+		elif key == pg.K_f and mod == pg.KMOD_LCTRL:
+			self.root = self.selected_node
+		elif key == pg.K_r and mod == pg.KMOD_LCTRL:
+			self.root = self.default_root
+
+
+
+	def draw(self, target=draw.screen):
+		# A list that contains tuples: (string, depth), which represent all the treeview items to draw, in order, at which depth
+		#self.depth_list = {}
+		#self._generate_depth_list(parent_object=self.parent_node, max_level=0)
+		self.current_list = []
+		self._generate_current_list(current_node=self.root)
+		# print(self.current_list)
+		for i, depth_pair in enumerate(self.current_list):
+			node = depth_pair[0]
+			depth = depth_pair[1]
+
+			string_surface = self.font.render('>>'*depth + str(node.name) + ' = ' + str(node.value), True, c.white)
+
+			if node == self.selected_node:
+				pg.draw.rect(target, c.red, ((self.pos[0], self.pos[1]+self.font.get_linesize()*i),string_surface.get_size()))
+			target.blit(string_surface, (self.pos[0], self.pos[1]+self.font.get_linesize()*i))
+
 class Button(Element):
 	def __init__(	self,
 					pos, font,
@@ -170,7 +279,7 @@ class Button(Element):
 					text_colors={'default': c.white, 'hovered': c.white, 'pressed': c.white},
 					padding=(10,0),
 					parent_container=None):
-		Element.__init__(self, parent_container)
+		Element.__init__(self=self, parent_container=parent_container)
 		self.pos = pos
 		self.font = font
 		self.text = text
