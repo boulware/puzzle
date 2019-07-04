@@ -1,5 +1,12 @@
-import colors as c
+import pygame as pg
 
+import constants as c
+import debug as d
+import util
+
+screen = None
+
+#@d.info
 def draw_surface_aligned(target, source, pos, align=('left','left'), offset=(0,0), alpha=255):
 	align_offset = list(offset)
 

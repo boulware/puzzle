@@ -1,0 +1,7 @@
+[TYPECHECK]
+ignored-modules = pygame
+
+[MESSAGES CONTROL]
+disable=C0326,C0103,W0108,too-many-instance-attributes
+
+max-line-length=150

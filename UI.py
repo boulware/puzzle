@@ -1,4 +1,4 @@
-import colors as c
+import constants as c
 import pygame as pg
 import draw
 import util
@@ -153,7 +153,7 @@ class Label(Element):
 	def text(self, new_text):
 		self._text = new_text
 		self._generate_surface()
-	
+
 
 	def _generate_surface(self):
 		self.surface = self.font.render(self.text, True, self.text_color)
@@ -232,7 +232,7 @@ class Button(Element):
 	@pressed.setter
 	def pressed(self, pressed):
 		self._pressed = pressed
-	
+
 	def left_mouse_pressed(self, mouse_pos):
 		if self.rect.collidepoint(mouse_pos):
 			self.pressed = True
@@ -326,7 +326,7 @@ class TextEntry(Element):
 	@property
 	def height(self):
 		return self._calculate_height()
-	
+
 	def _calculate_char_positions(self, pos=None):
 		char_positions = []
 		if pos == None: # Recalculate positions for the whole string
@@ -401,7 +401,7 @@ class TextEntry(Element):
 		self._cursor_pos = cursor_pos
 		self.cursor_visible = True
 		self.cursor_timer = 0
-		
+
 	def clear_text(self):
 		self.text = ''
 		self.selected_text_indices = None
@@ -652,7 +652,7 @@ class ListMenu(Element):
 			return self.items[self.confirmed_index]
 		else:
 			return ''
-	
+
 
 	@property
 	def selected(self):
@@ -777,11 +777,11 @@ class ChatWindow(Element):
 	@property
 	def height(self):
 		return self.log_height + self.text_entry.height
-	
+
 	@property
 	def rect(self):
 		return pg.Rect(self.pos, (self.width, self.height))
-	
+
 	def add_message(self, user, text):
 		message = (user, text)
 		self.messages.append(message)
@@ -826,14 +826,18 @@ class ChatWindow(Element):
 		for message in self.messages[::-1]: # Look through messages backwards, since we only show the most recent ones
 			this_line_count = len(util.split_text(text=message[1], font=self.message_font, word_wrap_width=self.message_width))
 			current_line_count += this_line_count
-			draw.draw_text(	text=message[0],
+			draw.draw_text(
+						target=screen,
+						text=message[0],
 						pos=(self.pos[0], self.pos[1] + self.log_height - current_line_count*line_spacing),
 						font=self.name_font,
 						color = self.user_colors[message[0]],
 						word_wrap = False)
-			draw.draw_text(	text=message[1],
+			draw.draw_text(
+						target=screen,
+						text=message[1],
 						pos=(self.name_width + self.pos[0], self.pos[1] + self.log_height - current_line_count*line_spacing),
 						font = self.message_font,
-						color = lighten_color(self.user_colors[message[0]], 0.5),
+						color = util.lighten_color(self.user_colors[message[0]], 0.5),
 						word_wrap = True,
 						word_wrap_width = self.message_width)
