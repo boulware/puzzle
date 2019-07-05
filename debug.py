@@ -7,6 +7,8 @@ import copy
 import pygame as pg
 import constants as c
 
+from game_object import GameObject
+
 colorama.init(autoreset=True)
 
 print_callstack = traceback.print_stack
@@ -28,14 +30,16 @@ def info(func):
 
 	return wrapper
 
-class DebugUI:
+class DebugUI(GameObject):
 	def __init__(self, game, active=False):
 		self.game = game
 		self.active = active
 		self.font = pg.font.Font('Montserrat-Regular.ttf', 14)
 		self.displayed_strings = []
 		from UI import TreeView
-		self.test_treeview = TreeView(pos=(0,0), font=self.font, parent_node_object=self.game)
+		self.test_treeview = TreeView(pos=(0,0), font=self.font, parent_node_object=self)
+		self.test_float = 10.0
+		self.test_treeview.root.load_children() # Required for the treeview itself to show up in the debug list from the beginning
 
 		self._hook_all()
 

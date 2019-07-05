@@ -2,9 +2,17 @@ import constants as c
 import pygame as pg
 import draw
 import util
+import numpy as np
 import debug as d
 
-class Element:
+import colorama
+from colorama import Fore, Back, Style
+colorama.init(autoreset=True)
+
+from game_object import GameObject
+
+
+class Element(GameObject):
 	def __init__(self, parent_container=None):
 		self.parent_container = parent_container
 		self.events = []
@@ -20,7 +28,7 @@ class Element:
 	def update(self, dt, mouse_pos):
 		pass
 
-class Container:
+class Container(GameObject):
 	def __init__(self):
 		self.elements = []
 		self.group_parent = None
@@ -71,8 +79,8 @@ class Container:
 			self.focused_element.left_mouse_released(mouse_pos)
 
 	def update(self, dt, mouse_pos):
-		for e in self.elements:
-			e.update(dt, mouse_pos)
+		for element in self.elements:
+			element.update(dt, mouse_pos)
 
 	def draw(self, screen):
 		for e in self.elements:
@@ -82,7 +90,7 @@ class Container:
 
 # Represents a group of individual Containers that are displayed
 # on the screen at once and interact smoothly between each other
-class Group:
+class Group(GameObject):
 	def __init__(self, containers, screen):
 		self.containers = containers
 		self.focused_container = None
@@ -171,7 +179,7 @@ class TreeView(Element):
 		self.pos = pos
 		self.font = font
 
-		class Node:
+		class Node(GameObject):
 			def __init__(self, name, value, parent=None, expanded=False):
 				self.name = name
 				self.value = value
@@ -183,34 +191,114 @@ class TreeView(Element):
 				if parent is not None:
 					parent.add_child(self)
 
+			def set_value(self, value):
+				try:
+					self.value = value
+				except TypeError as e:
+					# Increment operator is not defined for the type of value,
+					# so we ignore the increment and do nothing
+					print('lvl 1: ', e)
+					pass
+				else:
+					try:
+						self.parent.value[self.name] = value
+					except TypeError as e:
+						try:
+							print(f'lvl 2 (name={self.parent.name}): {e}')
+							# The parent type doesn't support __setitem__ (as indexing), so we assume it's a tuple?
+							# I think I'll ducktype all my classes for __getitem__ and __setitem__ to call getattr()/setattr()
+
+							# If the parent is a tuple, we have to go one level above to search for a mutable type (list, dict, obj):
+							# Then after we look one level up, if it's still not mutable, we go up a level again, u.s.w.
+
+							node = self
+							parent = self.parent
+							temp_list = list(parent.value)
+							temp_list[node.name] = value
+
+							mutable_found = False
+							while mutable_found is False:
+								node = parent
+								parent = node.parent
+								try:
+									parent.value[node.name] = tuple(temp_list)
+									mutable_found = True
+								except TypeError as error:
+									new_temp_list = list(parent.value)
+									new_temp_list[parent.name] = tuple(temp_list)
+									temp_list = new_temp_list
+						except TypeError as error:
+							print(Fore.RED + f"{type(parent.value)} may not be ducktyped for __getattr__() or __setattr__()")
+							print(Fore.MAGENTA + f"error: {error}")
+
+
+			def update_nearest_mutable(self):
+				"""Looks through parents until it finds an object that's mutable,
+				then updates it to reflect the current state"""
+				pass
+
+
 			def add_child(self, child):
 				self.children.append(child)
 
+			@d.info
 			def load_children(self):
 				self.children = []
-				try:
-					# If this node is an instance of an object with attributes, add nodes for each attr
-					for attr_name, attr_value in vars(self.value).items():
-						child = Node(name=attr_name, value=attr_value, parent=self)
-					return
-				except:
-					pass # Not an instance of an object
 
-				try:
-					# If this node is a list:
+				if isinstance(self.value, (tuple,list)):
 					for index, value in enumerate(self.value):
-						child = Node(name=str(index), value=value, parent=self)
-				except:
-					pass # Not a list
+						child = Node(name=int(index), value=value, parent=self)
+				elif isinstance(self.value, np.ndarray):
+					for index, value in np.ndenumerate(self.value):
+						child = Node(name=int(index), value=value, parent=self)
+				elif isinstance(self.value, dict):
+					for attr_name, attr_value in self.value.items():
+						child = Node(name=attr_name, value=attr_value, parent=self)
+				else:
+					# It's probably an object, or it's not iterable at all.
+					try:
+						for attr_name, attr_value in vars(self.value).items():
+							child = Node(name=attr_name, value=attr_value, parent=self)
+					except TypeError as e:
+						print(f"{self.value} (type={type(self.value)}) could not be iterated as tuple,list,dict,object,np.ndarray")
+						print(f"error: {e}")
+						# This type has no sensible way to have 'children'
+
+
+
+
+
+
+				# print('TTTT')
+				# print(self.name)
+				# print(self.value)
+				# print(self.children)
+				# print('***')
+
+				# try:
+				# 	# If this node is a list:
+				# 	for index, value in enumerate(self.value):
+				# 		child = Node(name=str(index), value=value, parent=self)
+				# except:
+				# 	pass # Not a list
 
 
 			def refresh_children(self):
-				for child in self.children:
-					if hasattr(self.value, child.name):
-						child.value = getattr(self.value, child.name)
+				try:
+					for child in self.children:
+						child.value = self.value[child.name]
+						child.refresh_children()
+				except TypeError as e:
+					# This can be solved by ducktyping later (I think), but for now let's handle objects separately
+					# print(f"{self.name} is not subscriptable")
+					# print(f"error: {e}")
+
+					for child in self.children:
+						if hasattr(self, child.name):
+							child.value = getattr(self, child.name)
 
 		self.parent_node_object = parent_node_object # Parent object, from which all branches stem
-		self.root = Node(name='Game', value=parent_node_object, expanded=True)
+		self.root = Node(name=type(parent_node_object).__name__, value=parent_node_object, expanded=True)
 		self.default_root = self.root
 		self.root.load_children()
 		self.selected_node = self.root
@@ -228,8 +316,8 @@ class TreeView(Element):
 			for child_node in current_node.children:
 				self._generate_current_list(current_node=child_node, depth=depth+1)
 
-
 	def any_key_pressed(self, key, mod, unicode_key):
+
 		if key == pg.K_DOWN:
 			for i, depth_pair in enumerate(self.current_list):
 				node = depth_pair[0]
@@ -250,6 +338,31 @@ class TreeView(Element):
 			self.root = self.selected_node
 		elif key == pg.K_r and mod == pg.KMOD_LCTRL:
 			self.root = self.default_root
+			self.root.expanded = False
+			self.selected_node = self.root
+		elif key == pg.K_RIGHT:
+			value = self.selected_node.value
+			if type(value) is bool:
+				self.selected_node.set_value(True)
+			elif type(value) is int:
+				self.selected_node.set_value(value + 1)
+			elif type(value) is float:
+				# Increase by 1%
+				self.selected_node.set_value(value*1.01)
+			else:
+				print("Tried to increment debug value which is not implemented.")
+		elif key == pg.K_LEFT:
+			value = self.selected_node.value
+			if type(value) is bool:
+				self.selected_node.set_value(False)
+			elif type(value) is int:
+				self.selected_node.set_value(value - 1)
+			elif type(value) is float:
+				# Decrease by 1%
+				self.selected_node.set_value(value*0.99)
+			else:
+				print("Tried to increment debug value which is not implemented.")
+
 
 
 
@@ -867,7 +980,7 @@ class ChatWindow(Element):
 		self.text_color = text_color
 		self.user_color_pool = [c.white, c.grey]
 		self.colors_used = 0
-		self.user_colors = {"Offline": c.grey}
+		self.user_colors = {"OFFLINE": c.grey}
 		self.messages = []
 
 		self.text_entry = TextEntry(pos=(self.pos[0], self.pos[1]+self.log_height),
