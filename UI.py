@@ -5,6 +5,8 @@ import util
 import numpy as np
 import debug as d
 
+import inspect
+
 import colorama
 from colorama import Fore, Back, Style
 colorama.init(autoreset=True)
@@ -170,20 +172,7 @@ class Label(Element):
 	def draw(self, screen):
 		draw.draw_surface_aligned(target=screen, source=self.surface, pos=self.pos, align=self.align)
 
-class TreeView(Element):
-	def __init__(	self,
-					pos, font,
-					parent_node_object=dict(),
-					parent_container=None):
-		Element.__init__(self=self, parent_container=parent_container)
-		self.pos = pos
-		self.font = font
-
-		self.text_color = c.white
-		self.active_node_color = c.red
-		self.max_string_length = 80
-
-		class Node(GameObject):
+class Node(GameObject):
 			def __init__(self, name, value, parent=None, expanded=False):
 				self.name = name
 				self.value = value
@@ -232,7 +221,7 @@ class TreeView(Element):
 									new_temp_list[parent.name] = tuple(temp_list)
 									temp_list = new_temp_list
 						except TypeError as error:
-							print(Fore.RED + f"{type(parent.value)} may not be ducktyped for __getattr__() or __setattr__()")
+							print(Fore.RED + f"{type(parent.value).__name__} may not be ducktyped for __getattr__() or __setattr__()")
 							print(Fore.MAGENTA + f"error: {error}")
 
 
@@ -254,14 +243,15 @@ class TreeView(Element):
 						child = Node(name=int(index), value=value, parent=self)
 				elif isinstance(self.value, np.ndarray):
 					for index, value in np.ndenumerate(self.value):
-						child = Node(name=int(index), value=value, parent=self)
+						child = Node(name=index, value=value, parent=self)
 				elif isinstance(self.value, dict):
 					for attr_name, attr_value in self.value.items():
 						child = Node(name=attr_name, value=attr_value, parent=self)
 				else:
 					# It's probably an object, or it's not iterable at all.
 					try:
-						for attr_name, attr_value in vars(self.value).items():
+						members = inspect.getmembers(self.value, lambda a:not(inspect.isroutine(a)))
+						for attr_name, attr_value in [a for a in members if not(a[0].startswith('__') and a[0].endswith('__'))]:
 							child = Node(name=attr_name, value=attr_value, parent=self)
 					except TypeError as e:
 						print(f"{self.value} (type={type(self.value)}) could not be iterated as tuple,list,dict,object,np.ndarray")
@@ -301,6 +291,21 @@ class TreeView(Element):
 						if hasattr(self, child.name):
 							child.value = getattr(self, child.name)
 
+class TreeView(Element):
+	def __init__(	self,
+					pos, font_size=14,
+					parent_node_object=dict(),
+					parent_container=None):
+		Element.__init__(self=self, parent_container=parent_container)
+		self.pos = pos
+		self.font = None
+		self.font_size = font_size
+		print('t')
+
+		self.text_color = c.white
+		self.active_node_color = c.red
+		self.max_string_length = 80
+
 		self.parent_node_object = parent_node_object # Parent object, from which all branches stem
 		self.root = Node(name=type(parent_node_object).__name__, value=parent_node_object, expanded=True)
 		self.default_root = self.root
@@ -312,6 +317,15 @@ class TreeView(Element):
 		# Is a simple string list of each displayed item with its corresponding integer depth
 		# (contains no actual object references)
 		self.current_list = []
+
+	@property
+	def font_size(self):
+		return self._font_size
+
+	@font_size.setter
+	def font_size(self, value):
+		self._font_size = value
+		self.font = pg.font.Font('Montserrat-regular.ttf', value)
 
 	def _generate_current_list(self, current_node, depth=0):
 		self.current_list.append((current_node, depth))
@@ -369,6 +383,12 @@ class TreeView(Element):
 				self.selected_node.set_value(value - value*(0.01*multiplier))
 			else:
 				print("Tried to increment debug value which is not implemented.")
+		elif key == pg.K_DELETE:
+			self.selected_node.set_value(None)
+		elif key == pg.K_0:
+			value = self.selected_node.value
+			if type(value) is int or type(value) is float:
+				self.selected_node.set_value(0)
 
 
 

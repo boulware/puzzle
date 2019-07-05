@@ -31,9 +31,11 @@ from card import BuildingCard, BuilderCard, CreatureCard
 from font import fonts
 from card_actions import ScanAction
 
+from game_object import GameObject
+
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
-class CardPool:
+class CardPool(GameObject):
     """Keeps copies of the 'baseline' cards with no modifications"""
     def __init__(self):
         self.cards = []
@@ -56,7 +58,7 @@ class CardPool:
 
         return None
 
-class Game:
+class Game(GameObject):
     """Delegates local input, frame-by-frame updates, and network input to objects in the game"""
     def __init__(self, screen, start_state=None, debug=False):
         self.screen = screen

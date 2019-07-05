@@ -35,11 +35,12 @@ class DebugUI(GameObject):
 		self.game = game
 		self.active = active
 		self.font = pg.font.Font('Montserrat-Regular.ttf', 14)
+		self.bg_alpha = 0
 		self.displayed_strings = []
 		from UI import TreeView
 		self.test_float = 1.0 # To test operations on floats in debug interface
 
-		self.test_treeview = TreeView(pos=(0,0), font=self.font, parent_node_object=self)
+		self.test_treeview = TreeView(pos=(0,0), font_size=14, parent_node_object=self)
 		self.test_treeview.root.load_children() # Required for the treeview itself to show up in the debug list from the beginning
 
 		self._hook_all()
@@ -116,6 +117,11 @@ class DebugUI(GameObject):
 		if self.active == False: return
 		screen = self.game.screen
 
+		if self.bg_alpha > 0:
+			bg = pg.Surface(screen.get_size())
+			bg.set_alpha(self.bg_alpha)
+			pg.draw.rect(bg, c.black, ((0,0),(screen.get_size())))
+			screen.blit(bg, (0,0))
 		pg.draw.rect(screen, c.blue_green, ((0,0),(200,100)))
 
 		current_y = 0
