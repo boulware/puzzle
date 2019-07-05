@@ -179,6 +179,10 @@ class TreeView(Element):
 		self.pos = pos
 		self.font = font
 
+		self.text_color = c.white
+		self.active_node_color = c.red
+		self.max_string_length = 80
+
 		class Node(GameObject):
 			def __init__(self, name, value, parent=None, expanded=False):
 				self.name = name
@@ -317,6 +321,9 @@ class TreeView(Element):
 				self._generate_current_list(current_node=child_node, depth=depth+1)
 
 	def any_key_pressed(self, key, mod, unicode_key):
+		multiplier = 1
+		if mod == pg.KMOD_LSHIFT:
+			multiplier = 10
 
 		if key == pg.K_DOWN:
 			for i, depth_pair in enumerate(self.current_list):
@@ -345,10 +352,10 @@ class TreeView(Element):
 			if type(value) is bool:
 				self.selected_node.set_value(True)
 			elif type(value) is int:
-				self.selected_node.set_value(value + 1)
+				self.selected_node.set_value(value + (1*multiplier))
 			elif type(value) is float:
-				# Increase by 1%
-				self.selected_node.set_value(value*1.01)
+				# Increase by 1%; 10% when boosted
+				self.selected_node.set_value(value + value*(0.01*multiplier))
 			else:
 				print("Tried to increment debug value which is not implemented.")
 		elif key == pg.K_LEFT:
@@ -356,10 +363,10 @@ class TreeView(Element):
 			if type(value) is bool:
 				self.selected_node.set_value(False)
 			elif type(value) is int:
-				self.selected_node.set_value(value - 1)
+				self.selected_node.set_value(value - (1*multiplier))
 			elif type(value) is float:
 				# Decrease by 1%
-				self.selected_node.set_value(value*0.99)
+				self.selected_node.set_value(value - value*(0.01*multiplier))
 			else:
 				print("Tried to increment debug value which is not implemented.")
 
@@ -377,10 +384,14 @@ class TreeView(Element):
 			node = depth_pair[0]
 			depth = depth_pair[1]
 
-			string_surface = self.font.render('>>'*depth + str(node.name) + ' = ' + str(node.value), True, c.white)
+			string = '>>'*depth + str(node.name) + ' = ' + str(node.value)
+			max_string_length = self.max_string_length
+			if len(string) > max_string_length:
+				string = string[:max_string_length] + ' [...] ' + string[-10:]
+			string_surface = self.font.render(string, True, self.text_color)
 
 			if node == self.selected_node:
-				pg.draw.rect(target, c.red, ((self.pos[0], self.pos[1]+self.font.get_linesize()*i),string_surface.get_size()))
+				pg.draw.rect(target, self.active_node_color, ((self.pos[0], self.pos[1]+self.font.get_linesize()*i),string_surface.get_size()))
 			target.blit(string_surface, (self.pos[0], self.pos[1]+self.font.get_linesize()*i))
 
 class Button(Element):
