@@ -4,8 +4,9 @@ import constants as c
 import pygame as pg
 import draw
 
+from game_object import GameObject
 
-class Grid:
+class Grid(GameObject):
 	def __init__(self, dimensions, origin, cell_size):
 		self.dimensions = np.array(dimensions)
 		self.origin = origin
@@ -91,7 +92,7 @@ class Grid:
 	# Return the cell position. Align lets you choose among the corners, centers of edges, or center. Default params top left corner
 	def get_cell_pos(self, cell, align=('left','up')):
 		pos = [self.rect[i] + cell[i]*self.cell_size[i] for i in range(2)]
-		
+
 		if align[0] == 'center':
 			pos[0] += self.cell_size[0]//2
 		elif align[0] == 'right':
@@ -164,7 +165,7 @@ class Grid:
 			pg.draw.line(self.surface, grid_color, (x_start, 0), (x_start, self.cell_size[1]*self.dimensions[1]))
 		for y in range(self.dimensions[1]+1):
 			y_start = y*self.cell_size[1]
-			pg.draw.line(self.surface, grid_color, (0, y_start), (self.cell_size[0]*self.dimensions[0], y_start))		
+			pg.draw.line(self.surface, grid_color, (0, y_start), (self.cell_size[0]*self.dimensions[0], y_start))
 
 	def draw(self, screen, color=c.white, player_perspective=0):
 		if self.drawable:
@@ -213,7 +214,7 @@ class Grid:
 		draw.draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
 
 
-class Board:
+class Board(GameObject):
 	def __init__(self, field, size):
 		self.field = field
 
@@ -384,7 +385,7 @@ class Board:
 
 		if sync == True:
 			send_string = 'building moved;' + 	str(start_cell[0]) + ';' + str(start_cell[1]) + ';' + str(target_cell[0]) + ';' + str(target_cell[1]) + ';[END]'
-			self.field.game.queue_network_data(send_string.encode('utf-8'))		
+			self.field.game.queue_network_data(send_string.encode('utf-8'))
 
 
 
@@ -442,7 +443,7 @@ class Board:
 
 
 	def _refresh_passives(self):
-		pass 
+		pass
 		# dirty = False
 
 		# self._clear_buffs()

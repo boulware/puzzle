@@ -288,8 +288,8 @@ class Node(GameObject):
 					# print(f"error: {e}")
 
 					for child in self.children:
-						if hasattr(self, child.name):
-							child.value = getattr(self, child.name)
+						if hasattr(self.value, child.name):
+							child.value = getattr(self.value, child.name)
 
 class TreeView(Element):
 	def __init__(	self,
