@@ -195,7 +195,7 @@ class Node(GameObject):
 				else:
 					try:
 						self.parent.value[self.name] = value
-					except TypeError as e:
+					except (TypeError, AttributeError) as e:
 						try:
 							print(f'lvl 2 (name={self.parent.name}): {e}')
 							# The parent type doesn't support __setitem__ (as indexing), so we assume it's a tuple?
@@ -220,7 +220,8 @@ class Node(GameObject):
 									new_temp_list = list(parent.value)
 									new_temp_list[parent.name] = tuple(temp_list)
 									temp_list = new_temp_list
-						except TypeError as error:
+						except (TypeError, AttributeError) as error:
+							print(Fore.YELLOW + f"Unable to set attribute on {parent.value}")
 							print(Fore.RED + f"{type(parent.value).__name__} may not be ducktyped for __getattr__() or __setattr__()")
 							print(Fore.MAGENTA + f"error: {error}")
 
@@ -336,7 +337,7 @@ class TreeView(Element):
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		multiplier = 1
-		if mod == pg.KMOD_LSHIFT:
+		if mod == pg.KMOD_LSHIFT or mod == pg.KMOD_RSHIFT:
 			multiplier = 10
 
 		if key == pg.K_DOWN:
@@ -355,9 +356,9 @@ class TreeView(Element):
 			if self.selected_node is not None:
 				self.selected_node.load_children()
 				self.selected_node.expanded = not self.selected_node.expanded
-		elif key == pg.K_f and mod == pg.KMOD_LCTRL:
+		elif key == pg.K_f and mod == pg.KMOD_LCTRL or mod == pg.KMOD_RCTRL:
 			self.root = self.selected_node
-		elif key == pg.K_r and mod == pg.KMOD_LCTRL:
+		elif key == pg.K_r and mod == pg.KMOD_LCTRL or mod == pg.KMOD_RCTRL:
 			self.root = self.default_root
 			self.root.expanded = False
 			self.selected_node = self.root
@@ -366,10 +367,14 @@ class TreeView(Element):
 			if type(value) is bool:
 				self.selected_node.set_value(True)
 			elif type(value) is int:
-				self.selected_node.set_value(value + (1*multiplier))
+					self.selected_node.set_value(value + (1*multiplier))
 			elif type(value) is float:
-				# Increase by 1%; 10% when boosted
-				self.selected_node.set_value(value + value*(0.01*multiplier))
+				# Increase by 1%; 10% when boosted (SHIFT);
+				# If it's 0.0, set it to 1.0
+				if value == 0.0:
+					self.selected_node.set_value(1.0)
+				else:
+					self.selected_node.set_value(value + value*(0.01*multiplier))
 			else:
 				print("Tried to increment debug value which is not implemented.")
 		elif key == pg.K_LEFT:
@@ -379,16 +384,28 @@ class TreeView(Element):
 			elif type(value) is int:
 				self.selected_node.set_value(value - (1*multiplier))
 			elif type(value) is float:
-				# Decrease by 1%
-				self.selected_node.set_value(value - value*(0.01*multiplier))
+				# Decrease by 1%; 10% when boosted (SHIFT)
+				# If it's 0.0, set it to -1.0
+				if value == 0.0:
+					self.selected_node.set_value(-1.0)
+				else:
+					self.selected_node.set_value(value - value*(0.01*multiplier))
 			else:
 				print("Tried to increment debug value which is not implemented.")
 		elif key == pg.K_DELETE:
 			self.selected_node.set_value(None)
 		elif key == pg.K_0:
 			value = self.selected_node.value
-			if type(value) is int or type(value) is float:
+			if type(value) is int:
 				self.selected_node.set_value(0)
+			if type(value) is float:
+				self.selected_node.set_value(0.0)
+		elif key == pg.K_BACKSPACE:
+			if self.selected_node.parent is not None:
+				if self.root == self.selected_node:
+					self.root = self.selected_node.parent
+				self.selected_node = self.selected_node.parent
+				self.selected_node.expanded = True
 
 
 
@@ -697,7 +714,7 @@ class TextEntry(Element):
 		if key == pg.K_LEFT:
 			if self.cursor_pos == 0:
 				pass
-			elif mod == pg.KMOD_LSHIFT:
+			elif mod == pg.KMOD_LSHIFT or mod == pg.KMOD_RSHIFT:
 				if self.selected_text_indices == None:
 					self.selected_text_indices = (self.cursor_pos-1, self.cursor_pos)
 				else:
@@ -721,7 +738,7 @@ class TextEntry(Element):
 		elif key == pg.K_RIGHT:
 			if self.cursor_pos == len(self.text):
 				pass
-			elif mod == pg.KMOD_LSHIFT:
+			elif mod == pg.KMOD_LSHIFT or mod == pg.KMOD_RSHIFT:
 				if self.selected_text_indices == None:
 					self.selected_text_indices = (self.cursor_pos, self.cursor_pos+1)
 				else:
