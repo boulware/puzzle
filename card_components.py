@@ -22,7 +22,7 @@ class HealthBar:
 			self._generate_surface()
 
 		return self._surface
-	
+
 	def _generate_surface(self):
 		self._surface = pg.Surface(self.size)
 		red_height = int(self.health/self.max_health*self.size[1])
@@ -41,11 +41,11 @@ class HealthBar:
 	@property
 	def max_health(self):
 		return self._max_health
-	
+
 	@property
 	def max_health(self):
 		return self._max_health
-	
+
 	@max_health.setter
 	def max_health(self, max_health):
 		self.dirty = True
@@ -57,11 +57,9 @@ class HealthBar:
 
 	@health.setter
 	def health(self, health):
-		print('old health=', self._health)
 		self.dirty = True
 		self._health = health
-		print('new health=', self._health)
-	
+
 	def set_health(self, new_health):
 		self.dirty = True
 

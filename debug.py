@@ -7,13 +7,11 @@ import copy
 import pygame as pg
 import constants as c
 
-from game_object import GameObject
-
 colorama.init(autoreset=True)
 
 print_callstack = traceback.print_stack
 active = False
-active_print = False
+active_print = True
 debugger = None
 
 def info(func):
@@ -30,7 +28,7 @@ def info(func):
 
 	return wrapper
 
-class DebugUI(GameObject):
+class DebugUI:
 	def __init__(self, game, active=False):
 		self.game = game
 		self.active = active
@@ -38,7 +36,6 @@ class DebugUI(GameObject):
 		self.bg_alpha = 0
 		self.displayed_strings = []
 		from UI import TreeView
-		self.test_float = 1.0 # To test operations on floats in debug interface
 
 		self.test_treeview = TreeView(pos=(0,0), font_size=14, parent_node_object=self)
 		self.test_treeview.root.load_children() # Required for the treeview itself to show up in the debug list from the beginning
@@ -122,7 +119,6 @@ class DebugUI(GameObject):
 			bg.set_alpha(self.bg_alpha)
 			pg.draw.rect(bg, c.black, ((0,0),(screen.get_size())))
 			screen.blit(bg, (0,0))
-		pg.draw.rect(screen, c.blue_green, ((0,0),(200,100)))
 
 		current_y = 0
 		for string in self.displayed_strings:
@@ -137,11 +133,11 @@ class DebugUI(GameObject):
 		self.test_treeview.any_key_pressed(key=key, mod=mod, unicode_key=unicode_key)
 		if key == pg.K_d and mod == pg.KMOD_LCTRL:
 			self.active = not self.active
-		elif key == pg.K_p and mod == pg.KMOD_LCTRL:
+		elif key == pg.K_PLUS and mod == pg.KMOD_LCTRL:
 			global active_print
 			active_print = not active_print
-		elif key == pg.K_t:
-			for depth_pair in self.test_treeview.current_list:
-				string = depth_pair[0]
-				depth = depth_pair[1]
-				print(Fore.RED + '>>'*depth + Fore.WHITE + ' ' + str(string))
+		elif key == pg.K_t and mod == pg.KMOD_LCTRL:
+			if self.bg_alpha != 255:
+				self.bg_alpha = 255
+			else:
+				self.bg_alpha = 0

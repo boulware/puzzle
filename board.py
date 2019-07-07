@@ -4,9 +4,7 @@ import constants as c
 import pygame as pg
 import draw
 
-from game_object import GameObject
-
-class Grid(GameObject):
+class Grid:
 	def __init__(self, dimensions, origin, cell_size):
 		self.dimensions = np.array(dimensions)
 		self.origin = origin
@@ -214,7 +212,7 @@ class Grid(GameObject):
 		draw.draw_surface_aligned(target=screen, source=surface, pos=cell_pos, align=align, offset=offset)
 
 
-class Board(GameObject):
+class Board:
 	def __init__(self, field, size):
 		self.field = field
 
@@ -229,9 +227,22 @@ class Board(GameObject):
 		self._generate_default_fow_surfaces()
 
 
-		self.selected_cell = None
+		self.selected_unit = None
+		self._selected_cell = None
+		print('board created')
 		player_count = 2
 		self.queued_cards = [[None]*c.grid_count[0] for i in range(player_count)]
+
+	@property
+	def selected_cell(self):
+		return self._selected_cell
+
+	@selected_cell.setter
+	def selected_cell(self, value):
+		if value is not None:
+			self.selected_unit = self.unit_cards[value]
+			self._selected_cell = value
+
 
 	def __iter__(self):
 		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self.unit_cards)])

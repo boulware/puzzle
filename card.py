@@ -28,6 +28,8 @@ class Card:
 		self._health_component = None
 		self._attack_component = None
 
+		self._power = 0
+
 		self.activated = True
 
 		# Number of values in visibility
@@ -140,7 +142,6 @@ class Card:
 		if self._health_component != None:
 			self.dirty = True
 			self._health_component.health = health
-			self.health_bar.set_health(self.health)
 
 	def change_health(self, amount):
 		if self._health_component != None:
@@ -151,6 +152,30 @@ class Card:
 	def max_health(self):
 		if self._health_component != None:
 			return self._health_component.max_health
+
+	@max_health.setter
+	def max_health(self, value):
+		if self._health_component != None:
+			self.dirty = True
+			self._health_component.max_health = value
+
+	@property
+	def power(self):
+		return self._power
+
+	@power.setter
+	def power(self, value):
+		self.dirty = True
+		self._power = value
+
+	@property
+	def cost(self):
+		return self._cost
+
+	@cost.setter
+	def cost(self, value):
+		self.dirty = True
+		self._cost = value
 
 	def move_to_hand(self, hand):
 		if isinstance(self.sub_board, np.ndarray) == False:
@@ -173,7 +198,7 @@ class Card:
 
 	@property
 	def hand_surface(self):
-		if self._hand_surface == None or self.dirty:
+		if self._hand_surface == None or self.dirty is True:
 			self.dirty = False
 			self.generate_surfaces()
 
@@ -181,7 +206,7 @@ class Card:
 
 	@property
 	def board_surface(self):
-		if self._board_surface == None or self.dirty:
+		if self._board_surface == None or self.dirty is True:
 			self.dirty = False
 			self.generate_surfaces()
 
@@ -206,10 +231,10 @@ class Card:
 		if self._health_component != None:
 			# Draw health bar
 			draw.draw_surface_aligned(	target=self.hand_surface,
-									source=self._health_component.health_bar.surface,
-									pos=c.hand_card_size,
-									align=('right','down'),
-									offset=(-1,-1))
+										source=self._health_component.health_bar.surface,
+										pos=c.hand_card_size,
+										align=('right','down'),
+										offset=(-1,-1))
 
 	def _generate_board_surface(self):
 		self._board_surface = pg.transform.smoothscale(self.hand_surface, c.board_card_size)
@@ -360,7 +385,7 @@ class CreatureCard(Card):
 		self.active_actions.update({'M': MoveAction(card=self), 'AM': AttackMoveAction(card=self)})
 		self.current_action = 'AM'
 
-		self.base_power = base_power
+		self.power = base_power
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
 	# Returns the cell directly in front of the card (assuming it's facing towards the enemy)
@@ -405,11 +430,6 @@ class CreatureCard(Card):
 	def sub_board(self):
 		if self.board == None: return
 		return self.board.unit_cards
-
-
-	@property
-	def power(self):
-		return self.base_power
 
 	def _generate_hand_surface(self):
 		Card._generate_hand_surface(self)
@@ -456,7 +476,7 @@ class CreatureCard(Card):
 	def clone(self):
 		return CreatureCard(name = self.name,
 							cost = self.cost,
-							base_power = self.base_power,
+							base_power = self.power,
 							max_health = self.max_health,
 							health = self.health,
 							visibility = self.visibility)

@@ -1,3 +1,5 @@
+import debug as d
+
 class Hand:
 	def __init__(self, field):
 		self.cards = []
@@ -7,10 +9,10 @@ class Hand:
 		return iter(self.cards)
 
 	def __getitem__(self, key):
-		if key < 0 or key >= self.card_count:
-			raise LookupError('Invalid hand index')
-
-		return self.cards[key]
+		try:
+			return self.cards[key]
+		except IndexError as error:
+			print(error)
 
 	@property
 	def card_count(self):

@@ -11,10 +11,8 @@ import colorama
 from colorama import Fore, Back, Style
 colorama.init(autoreset=True)
 
-from game_object import GameObject
 
-
-class Element(GameObject):
+class Element:
 	def __init__(self, parent_container=None):
 		self.parent_container = parent_container
 		self.events = []
@@ -30,7 +28,7 @@ class Element(GameObject):
 	def update(self, dt, mouse_pos):
 		pass
 
-class Container(GameObject):
+class Container:
 	def __init__(self):
 		self.elements = []
 		self.group_parent = None
@@ -92,7 +90,7 @@ class Container(GameObject):
 
 # Represents a group of individual Containers that are displayed
 # on the screen at once and interact smoothly between each other
-class Group(GameObject):
+class Group:
 	def __init__(self, containers, screen):
 		self.containers = containers
 		self.focused_container = None
@@ -172,7 +170,7 @@ class Label(Element):
 	def draw(self, screen):
 		draw.draw_surface_aligned(target=screen, source=self.surface, pos=self.pos, align=self.align)
 
-class Node(GameObject):
+class Node:
 			def __init__(self, name, value, parent=None, expanded=False):
 				self.name = name
 				self.value = value
@@ -185,112 +183,111 @@ class Node(GameObject):
 					parent.add_child(self)
 
 			def set_value(self, value):
+				self.value = value
+
 				try:
-					self.value = value
-				except TypeError as e:
-					# Increment operator is not defined for the type of value,
-					# so we ignore the increment and do nothing
-					print('lvl 1: ', e)
-					pass
-				else:
-					try:
+					if isinstance(self.parent.value, (list,dict,np.ndarray)):
 						self.parent.value[self.name] = value
-					except (TypeError, AttributeError) as e:
-						try:
-							print(f'lvl 2 (name={self.parent.name}): {e}')
-							# The parent type doesn't support __setitem__ (as indexing), so we assume it's a tuple?
-							# I think I'll ducktype all my classes for __getitem__ and __setitem__ to call getattr()/setattr()
+					else:
+						setattr(self.parent.value, self.name, value)
+				except AttributeError as error:
+					# Attribute has no setter, so do nothing
+					pass
+				except TypeError as error:
+					# try:
+						#print(f'lvl 2 (name={self.parent.name}): {e}')
+						# The parent type doesn't support __setitem__ (as indexing), so we assume it's a tuple?
+						# I think I'll ducktype all my classes for __getitem__ and __setitem__ to call getattr()/setattr()
 
-							# If the parent is a tuple, we have to go one level above to search for a mutable type (list, dict, obj):
-							# Then after we look one level up, if it's still not mutable, we go up a level again, u.s.w.
+						# If the parent is a tuple, we have to go one level above to search for a mutable type (list, dict, obj):
+						# Then after we look one level up, if it's still not mutable, we go up a level again, u.s.w
 
-							node = self
-							parent = self.parent
-							temp_list = list(parent.value)
-							temp_list[node.name] = value
+						node = self
+						parent = self.parent
+						temp_list = list(parent.value)
+						temp_list[node.name] = value
 
-							mutable_found = False
-							while mutable_found is False:
-								node = parent
-								parent = node.parent
-								try:
+						mutable_found = False
+						while mutable_found is False:
+							node = parent
+							parent = node.parent
+							try:
+								if isinstance(parent.value, (list,dict,np.ndarray,tuple)):
 									parent.value[node.name] = tuple(temp_list)
-									mutable_found = True
-								except TypeError as error:
-									new_temp_list = list(parent.value)
+								else:
+									setattr(parent.value, node.name, tuple(temp_list))
+
+								mutable_found = True
+							except TypeError as error:
+								new_temp_list = list(parent.value)
+								if isinstance(parent.value, (list,dict,np.ndarray,tuple)):
 									new_temp_list[parent.name] = tuple(temp_list)
-									temp_list = new_temp_list
-						except (TypeError, AttributeError) as error:
-							print(Fore.YELLOW + f"Unable to set attribute on {parent.value}")
-							print(Fore.RED + f"{type(parent.value).__name__} may not be ducktyped for __getattr__() or __setattr__()")
-							print(Fore.MAGENTA + f"error: {error}")
-
-
-			def update_nearest_mutable(self):
-				"""Looks through parents until it finds an object that's mutable,
-				then updates it to reflect the current state"""
-				pass
-
+								else:
+									setattr(parent.value, parent.name, tuple(temp_list))
+								temp_list = new_temp_list
+					# except (TypeError, AttributeError) as error:
+					# 	d.print_callstack()
+					# 	print(Fore.YELLOW + f"Unable to set attribute \'{node.name}\' on {parent.value}")
+					# 	print(Fore.RED + f"{type(parent.value).__name__} may not be ducktyped for __getattr__() or __setattr__()")
+					# 	print(Fore.MAGENTA + f"error: {error}")
 
 			def add_child(self, child):
 				self.children.append(child)
 
-			@d.info
+			def get_indexable_attributes(self):
+				# Returns list of attributes accessible by [] ('__getitem__')
+
+				attribute_names = []
+
+				if isinstance(self.value, (tuple,list)):
+					for index, _ in enumerate(self.value):
+						attribute_names.append(index)
+				elif isinstance(self.value, np.ndarray):
+					for index, _ in np.ndenumerate(self.value):
+						attribute_names.append(index)
+				elif isinstance(self.value, dict):
+					for key, value in self.value.items():
+						attribute_names.append(key)
+				else:
+					try:
+						members = inspect.getmembers(self.value, lambda a:not(inspect.isroutine(a)))
+						for member_name, _ in [a for a in members if not(a[0].startswith('__') and a[0].endswith('__')) if not(a[0].startswith('_'))]:
+							attribute_names.append(member_name)
+					except TypeError as e:
+						attribute_names = []
+
+				return attribute_names
+
 			def load_children(self):
 				self.children = []
 
-				if isinstance(self.value, (tuple,list)):
-					for index, value in enumerate(self.value):
-						child = Node(name=int(index), value=value, parent=self)
-				elif isinstance(self.value, np.ndarray):
-					for index, value in np.ndenumerate(self.value):
-						child = Node(name=index, value=value, parent=self)
-				elif isinstance(self.value, dict):
-					for attr_name, attr_value in self.value.items():
-						child = Node(name=attr_name, value=attr_value, parent=self)
+				attribute_names = self.get_indexable_attributes()
+
+				if len(attribute_names) == 0:
+					self.expanded = False
+
+				if isinstance(self.value, (list,dict,np.ndarray,tuple)):
+					for name in attribute_names:
+						Node(name=name, value=self.value[name], parent=self)
 				else:
-					# It's probably an object, or it's not iterable at all.
-					try:
-						members = inspect.getmembers(self.value, lambda a:not(inspect.isroutine(a)))
-						for attr_name, attr_value in [a for a in members if not(a[0].startswith('__') and a[0].endswith('__'))]:
-							child = Node(name=attr_name, value=attr_value, parent=self)
-					except TypeError as e:
-						print(f"{self.value} (type={type(self.value)}) could not be iterated as tuple,list,dict,object,np.ndarray")
-						print(f"error: {e}")
-						# This type has no sensible way to have 'children'
-
-
-
-
-
-
-				# print('TTTT')
-				# print(self.name)
-				# print(self.value)
-				# print(self.children)
-				# print('***')
-
-				# try:
-				# 	# If this node is a list:
-				# 	for index, value in enumerate(self.value):
-				# 		child = Node(name=str(index), value=value, parent=self)
-				# except:
-				# 	pass # Not a list
-
+					for name in attribute_names:
+						Node(name=name, value=getattr(self.value, name), parent=self)
 
 			def refresh_children(self):
-				try:
+				if len(self.get_indexable_attributes()) != len(self.children):
+					self.load_children()
+
+				if isinstance(self.value, (list,dict,np.ndarray,tuple)):
 					for child in self.children:
 						child.value = self.value[child.name]
-						child.refresh_children()
-				except TypeError as e:
-					# This can be solved by ducktyping later (I think), but for now let's handle objects separately
-					# print(f"{self.name} is not subscriptable")
-					# print(f"error: {e}")
-
+						if child.expanded is True:
+							child.refresh_children()
+				else:
 					for child in self.children:
-						if hasattr(self.value, child.name):
-							child.value = getattr(self.value, child.name)
+						child.value = getattr(self.value, child.name)
+						if child.expanded is True:
+							child.refresh_children()
+
 
 class TreeView(Element):
 	def __init__(	self,
@@ -301,17 +298,18 @@ class TreeView(Element):
 		self.pos = pos
 		self.font = None
 		self.font_size = font_size
-		print('t')
 
 		self.text_color = c.white
-		self.active_node_color = c.red
+		self.no_setter_text_color = c.grey
+		self.active_node_color = (150,50,50)
 		self.max_string_length = 80
 
 		self.parent_node_object = parent_node_object # Parent object, from which all branches stem
 		self.root = Node(name=type(parent_node_object).__name__, value=parent_node_object, expanded=True)
 		self.default_root = self.root
-		self.root.load_children()
+		#self.root.load_children()
 		self.selected_node = self.root
+		self.pinned_nodes = [] # Nodes to be pinned at the top of the tree view, so you can view/modify them easily
 
 		# Represents the current depth to which each branch (and sub-branch, sub-sub-...) is exploded
 		# This may need to keep named references, because the order of properties on an object might change over time? Not sure.
@@ -328,34 +326,79 @@ class TreeView(Element):
 		self._font_size = value
 		self.font = pg.font.Font('Montserrat-regular.ttf', value)
 
-	def _generate_current_list(self, current_node, depth=0):
-		self.current_list.append((current_node, depth))
-		if current_node.expanded is True:
-			current_node.refresh_children()
-			for child_node in current_node.children:
-				self._generate_current_list(current_node=child_node, depth=depth+1)
+	def _recursed_generate_current_list(self, current_node=None, depth=0):
+		if current_node is None:
+			current_node = self.root
+		if depth == 0:
+			self.current_list = []
+			for node in self.pinned_nodes:
+				self.current_list.append((node, -1))
+		if current_node not in self.pinned_nodes:
+			self.current_list.append((current_node, depth))
+			if current_node.expanded is True:
+				current_node.refresh_children()
+				for child_node in current_node.children:
+					self._recursed_generate_current_list(current_node=child_node, depth=depth+1)
+
+	def _generate_current_list(self, current_node=None, depth=0):
+		self._recursed_generate_current_list(current_node=current_node, depth=depth)
+
+		selected_in_current_list = False
+		# for depth_pair in self.current_list:
+		# 	print(depth_pair[0].name)
+		# print('***')
+
+		for depth_node in self.current_list:
+			node = depth_node[0]
+			# print(node.name, self.selected_node.name)
+			# print(node, self.selected_node)
+			if node == self.selected_node:
+				selected_in_current_list = True
+				break
+
+		if selected_in_current_list is False:
+			if len(self.current_list) > 0:
+				self.selected_node = self.current_list[0][0]
+
 
 	def any_key_pressed(self, key, mod, unicode_key):
 		multiplier = 1
 		if mod == pg.KMOD_LSHIFT or mod == pg.KMOD_RSHIFT:
 			multiplier = 10
 
+		if str(unicode_key).isalnum() or str(unicode_key) == '_':
+			if mod == pg.KMOD_LSHIFT or mod == pg.KMOD_RSHIFT:
+				search_list = self.current_list[::-1] # Search list backwards (i.e., seek a node upwards from selected node)
+			else:
+				search_list = self.current_list
+
+			searching = False
+			for node, _ in search_list:
+				if searching is True:
+					if str(node.name)[0].lower() == str(unicode_key).lower():
+						self.selected_node = node
+						break
+				if node == self.selected_node:
+					searching = True
+
 		if key == pg.K_DOWN:
 			for i, depth_pair in enumerate(self.current_list):
 				node = depth_pair[0]
+				depth = depth_pair[1]
 				if node == self.selected_node and i < len(self.current_list)-1:
 					self.selected_node = self.current_list[i+1][0]
 					break
 		elif key == pg.K_UP:
 			for i, depth_pair in enumerate(self.current_list):
 				node = depth_pair[0]
+				depth = depth_pair[1]
 				if node == self.selected_node and i > 0:
 					self.selected_node = self.current_list[i-1][0]
 					break
 		elif key == pg.K_RETURN:
 			if self.selected_node is not None:
-				self.selected_node.load_children()
 				self.selected_node.expanded = not self.selected_node.expanded
+				self.selected_node.load_children()
 		elif key == pg.K_f and mod == pg.KMOD_LCTRL or mod == pg.KMOD_RCTRL:
 			self.root = self.selected_node
 		elif key == pg.K_r and mod == pg.KMOD_LCTRL or mod == pg.KMOD_RCTRL:
@@ -406,28 +449,88 @@ class TreeView(Element):
 					self.root = self.selected_node.parent
 				self.selected_node = self.selected_node.parent
 				self.selected_node.expanded = True
+		elif key == pg.K_p and mod == pg.KMOD_LCTRL or mod == pg.KMOD_RCTRL:
+			if self.selected_node not in self.pinned_nodes:
+				# Node isn't pinned, so pin it
+				current_list_selected_index = None
+				for i, depth_pair in enumerate(self.current_list):
+					node = depth_pair[0]
+					if node == self.selected_node:
+						current_list_selected_index = i
+
+
+				if current_list_selected_index is None:
+					print("selected_node isn't in selected_list. something is probably wrong.")
+					return
+
+				self.pinned_nodes.append(self.selected_node)
+				if len(self.current_list) <= 1:
+					# Our newly pinned node is the only node in the tree, so it will stay selected
+					pass
+				elif current_list_selected_index == len(self.current_list)-1:
+					# Our newly pinned node was the LAST node in current_list, so move the selected node to the now last node
+					self.selected_node = self.current_list[current_list_selected_index-1][0]
+				else:
+					self.selected_node = self.current_list[current_list_selected_index-1][0]
+
+			else:
+				# Node is already pinned, so remove the pin
+				current_list_selected_index = None
+				for i, depth_pair in enumerate(self.current_list):
+					if depth_pair[0] == self.selected_node:
+						current_list_selected_index = i
+
+				if current_list_selected_index is None:
+					print("selected_node isn't in selected_list. something is probably wrong.")
+					return
+
+				self.pinned_nodes.remove(self.selected_node)
+
+				if current_list_selected_index == len(self.current_list)-1:
+					self.selected_node = self.current_list[current_list_selected_index-1][0]
+				elif len(self.current_list) > 1:
+					self.selected_node = self.current_list[current_list_selected_index+1][0]
+				else:
+					self.selected_node = None
+
+
 
 
 
 
 	def draw(self, target=draw.screen):
-		# A list that contains tuples: (string, depth), which represent all the treeview items to draw, in order, at which depth
-		#self.depth_list = {}
-		#self._generate_depth_list(parent_object=self.parent_node, max_level=0)
 		self.current_list = []
-		self._generate_current_list(current_node=self.root)
-		# print(self.current_list)
+		self._generate_current_list()
+
 		for i, depth_pair in enumerate(self.current_list):
 			node = depth_pair[0]
 			depth = depth_pair[1]
 
-			string = '>>'*depth + str(node.name) + ' = ' + str(node.value)
+			if depth == -1: # pinned node:
+				string = str(node.name) + ' = ' + str(node.value)
+			else:
+				string = '>>'*depth + str(node.name) + ' = ' + str(node.value)
+
 			max_string_length = self.max_string_length
 			if len(string) > max_string_length:
 				string = string[:max_string_length] + ' [...] ' + string[-10:]
+
 			string_surface = self.font.render(string, True, self.text_color)
 
-			if node == self.selected_node:
+			if node.parent is not None and self.selected_node is not node:
+				try:
+					attr = getattr(type(node.parent.value), node.name)
+					if isinstance(attr, property):
+						if attr.fset == None:
+							string_surface = self.font.render(string, True, self.no_setter_text_color)
+				except (AttributeError, TypeError):
+					pass
+
+			if depth == -1:
+				pg.draw.rect(target, c.blue, ((self.pos[0], self.pos[1]+self.font.get_linesize()*i),string_surface.get_size()))
+				if node == self.selected_node:
+					pg.draw.rect(target, self.active_node_color, ((self.pos[0], self.pos[1]+self.font.get_linesize()*i),string_surface.get_size()), 2)
+			elif node == self.selected_node:
 				pg.draw.rect(target, self.active_node_color, ((self.pos[0], self.pos[1]+self.font.get_linesize()*i),string_surface.get_size()))
 			target.blit(string_surface, (self.pos[0], self.pos[1]+self.font.get_linesize()*i))
 

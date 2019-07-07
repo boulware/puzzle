@@ -6,7 +6,6 @@ import constants as c
 from hand import Hand
 from phases import Phase, TurnDisplay
 from font import fonts
-from pygame.math import Vector2 as Vec
 import pygame as pg
 import draw
 import util
@@ -238,9 +237,9 @@ class Field(GameState):
 		self.phase = Phase(['Build','Act'])
 		self.turn_display = TurnDisplay(self.phase, fonts.ui_font)
 
-		self.hand_origin = Vec(self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50)))
-		self.hand_center = Vec(c.screen_size[0]//2, c.screen_size[1]-100)
-		self.hand_spacing = Vec(110,0)
+		self.hand_origin = self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50))
+		self.hand_center = (c.screen_size[0]//2, c.screen_size[1]-100)
+		self.hand_spacing = (110,0)
 		self.drag_card = None
 		self.card_grab_point = None
 
@@ -485,7 +484,7 @@ class Field(GameState):
 
 	def generate_hand_card_positions(self):
 		total_width = self.active_hand.card_count * self.hand_spacing[0]
-		return [Vec(self.hand_center[0]+i*self.hand_spacing[0]-total_width//2,self.hand_center[1]) for i in range(self.active_hand.card_count)]
+		return [(self.hand_center[0]+i*self.hand_spacing[0]-total_width//2,self.hand_center[1]) for i in range(self.active_hand.card_count)]
 
 	def get_left_side_of_hand(self):
 		card_coords = self.generate_hand_card_positions()
@@ -657,5 +656,5 @@ class Field(GameState):
 							drawn_in_board = True
 
 			if drawn_in_board == False:
-				mouse_coords = Vec(pg.mouse.get_pos())
+				mouse_coords = pg.mouse.get_pos()
 				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
