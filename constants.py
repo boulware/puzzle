@@ -30,6 +30,6 @@ node_size = (80,80)
 action_panel_size = (120,120)
 action_icon_size = (40,40)
 grid_origin = (100,10)
-hand_card_size = (100,160)
+hand_card_size = (80,160)
 card_proportion = hand_card_size[0]/hand_card_size[1]
 board_card_size = (int(node_size[0]*card_proportion),node_size[1])

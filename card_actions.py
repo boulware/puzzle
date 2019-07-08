@@ -1,3 +1,4 @@
+import debug as d
 
 class Action:
 	def __init__(self, card):
@@ -46,13 +47,13 @@ class MoveAction(Action):
 		if self.board.check_cell_valid(cell=self.target_cell) == False:
 			pass # If we're trying to move into an invalid cell, do nothing
 
-		target_card = self.board.unit_cards[self.target_cell]
+		target_card = self.board.get_unit_in_cell(cell=self.target_cell)
 		if target_card == None:
 			# There's no unit in the way; just move to the cell
 			self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
 		else:
 			pass # If there's a unit in the way and we're just moving (not attack moving), do nothing
-	
+
 class AttackMoveAction(Action):
 	def __init__(self, card):
 		Action.__init__(self=self, card=card)
@@ -69,20 +70,19 @@ class AttackMoveAction(Action):
 
 	def do(self):
 		# TODO: This check only works if the unit can only move 'forward'
-		if self.board.check_cell_valid(cell=self.target_cell) == False:
+		if self.board.check_cell_valid(cell=self.target_cell) is False:
 			# The unit is at the farthest cell (so it should deal damage to the enemy)
-			self.board.delete_unit_from_board(cell=self.card.cell, sync=True)
 			self.board.field.change_health(amount=-self.card.power, player=self.card.enemy, sync=True)
-
-		# the card occupying the target_cell (if nothing does, None)
-		target_card = self.board.unit_cards[self.target_cell]
-		if target_card == None:
-			# There's no unit in the way; just move to the cell
-			self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
+			self.board.delete_unit_from_board(cell=self.card.cell, sync=True)
 		else:
-			# There's a unit in the way; attack if it's owned by the enemy
-			if self.target_card.owner != self.owner:
-				self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
+			target_card = self.board.get_unit_in_cell(cell=self.target_cell)
+			if target_card is None:
+				# There's no unit in the way; just move to the cell
+				self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
+			else:
+				# There's a unit in the way; attack if it's owned by the enemy
+				if target_card.owner != self.owner:
+					self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
 
 class BuildAction(Action):
 	def __init__(self, card, target_cell=None, target_building=None):
@@ -92,9 +92,9 @@ class BuildAction(Action):
 
 	def do(self):
 		if self.card.cell == self.target_cell:
+			if self.board.building_cards[self.target_cell] is None:
+				self.board.place_card(cell=self.target_cell, card=self.target_building, owner=self.owner, sync=True)
 			self.board.delete_unit_from_board(cell=self.card.cell, sync=True) # Delete builder from board
-
-			self.board.place_card(cell=self.target_cell, card=self.target_building, owner=self.owner, sync=True)
 
 class MoveBuildAction(Action):
 	def __init__(self, card, target_cell=None, target_building=None):
@@ -114,7 +114,7 @@ class MoveBuildAction(Action):
 		self._target_building = value
 		self.move_action.target_building = value
 		self.build_action.target_building = value
-	
+
 	@property
 	def target_cell(self):
 		return self._target_cell
@@ -127,6 +127,10 @@ class MoveBuildAction(Action):
 
 	def do(self):
 		if self.card.cell == None: return
+
+		if self.board.building_cards[self.target_cell] is not None:
+			print(f'deleting {self.card.name} from {self.card.cell}')
+			self.board.delete_unit_from_board(cell=self.card.cell, sync=True)
 
 		if self.card.cell == self.target_cell:
 			self.build_action.do()

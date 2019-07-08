@@ -1,4 +1,5 @@
 """Plays Grid RTS Game"""
+
 # Some naming conventions used throughout the codebase:
 #
 # pos vs. cell
@@ -14,8 +15,11 @@
 #
 # classes/types are uppercased words, unseparated: CreatureCard, Card, ...
 # capitization exceptions: acronyms/initialisms will be all uppercase
+
 import sys
 import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
 import socket
 import selectors
 import types
@@ -27,11 +31,10 @@ import debug as d
 from input import Input
 from game_state import MainMenu, ConnectMenu, HostMenu, Field
 from card import BuildingCard, BuilderCard, CreatureCard
+import random
 
 from font import fonts
 from card_actions import ScanAction
-
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 class CardPool:
     """Keeps copies of the 'baseline' cards with no modifications"""
@@ -56,6 +59,11 @@ class CardPool:
 
         return None
 
+    def get_random_card(self):
+        cards_without_builders = [card for card in self.cards if isinstance(card, BuilderCard) is False]
+
+        return random.choice(cards_without_builders).clone()
+
 class Game:
     """Delegates local input, frame-by-frame updates, and network input to objects in the game"""
     def __init__(self, screen, start_state=None, debug=False):
@@ -63,10 +71,10 @@ class Game:
 
         self.card_pool = CardPool()
 
-        goblin_card_prototype = CreatureCard(name='Goblin', cost=2, base_power=1, max_health=2, visibility=[1])
-        elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=1, max_health=1, visibility=[1,0,0,0])
-        scout_card_prototype = CreatureCard(name='Scout', cost=1, base_power=0, max_health=1, visibility=[3,0,0,0])
-        drone_card_prototype = BuilderCard(name='Drone', cost=1, base_power=0, max_health=1, visibility=[1])
+        goblin_card_prototype = CreatureCard(name='Goblin', cost=2, base_power=3, max_health=2, visibility=[1])
+        elf_card_prototype = CreatureCard(name='Elf', cost=1, base_power=2, max_health=1, visibility=[1,0,0,0])
+        scout_card_prototype = CreatureCard(name='Scout', cost=1, base_power=1, max_health=1, visibility=[3,0,0,0])
+        drone_card_prototype = BuilderCard(name='Drone', cost=1, base_power=1, max_health=1, visibility=[1])
         blacksmith_card_prototype = BuildingCard(name='Blacksmith', cost=1, max_health=4, visibility=[0])
         satellite_card_prototype = BuildingCard(name='Satellite', cost=1, max_health=3, visibility=[0],
                                                 default_action='SCN',
@@ -98,7 +106,7 @@ class Game:
         self.ui_group = None
         self.ui_container = UI.Container()
         self.ui_container.add_element(self.connection_label)
-        self.ui_container.add_element(self.chat_window)
+        #self.ui_container.add_element(self.chat_window)
 
         self.input_map = {
             Input(key='any'): lambda key, mod, unicode_key: self.any_key_pressed(key=key, mod=mod, unicode_key=unicode_key),

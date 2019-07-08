@@ -11,6 +11,8 @@ import draw
 import util
 from card import *
 
+import random
+
 class GameState:
 	def __init__(self, game):
 		self.game = game
@@ -220,13 +222,8 @@ class Field(GameState):
 		self.board = Board(self, c.grid_count)
 		self.hands = [Hand(self), Hand(self)]
 
-		for _, hand in enumerate(self.hands):
-			hand.add_card('Goblin', 1)
-			hand.add_card('Elf', 1)
-			hand.add_card('Blacksmith', 2)
-			hand.add_card('Satellite', 1)
-			hand.add_card('Scout', 1)
-			hand.add_card('Tower', 2)
+		for hand in self.hands:
+			hand.add_random_cards(count=2)
 
 		self.player_turn = 0 # Player 'id' of the player whose turn it is.
 
@@ -242,15 +239,16 @@ class Field(GameState):
 		self.hand_spacing = (110,0)
 		self.drag_card = None
 		self.card_grab_point = None
+		self.act_animating = False
 
 
 		self.player_count = 2
 
-		self.turn_button = UI.Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
-									align=('right','up'),
-									font=fonts.ui_font,
-									text="End Turn",
-									parent_container=self)
+		# self.turn_button = UI.Button(	pos=self.board.grid.get_grid_pos(align=('left','down'),offset=(-100,-50)),
+		# 							align=('right','up'),
+		# 							font=fonts.ui_font,
+		# 							text="End Turn",
+		# 							parent_container=self)
 
 		if player_number == 0:
 			self.player_health_labels = [
@@ -271,7 +269,7 @@ class Field(GameState):
 					text='Player 1: %s'%self.player_healths[1])
 			]
 
-		self.ui_container.add_element(self.turn_button)
+		#self.ui_container.add_element(self.turn_button)
 		for label in self.player_health_labels:
 			self.ui_container.add_element(label)
 
@@ -320,7 +318,6 @@ class Field(GameState):
 		pos = self.board.grid.get_grid_pos(align=('right','center'), offset=(50, -c.action_panel_size[1]//2))
 		return pg.Rect(pos, c.action_panel_size)
 
-
 	def left_mouse_pressed(self, mouse_pos):
 		if self.hand_rect.collidepoint(mouse_pos): # mouse is hovering hand
 			hand_left = self.get_left_side_of_hand()
@@ -363,12 +360,12 @@ class Field(GameState):
 			self.card_grab_point = None # Probably not necessary
 
 		# TODO: Move this to the proper place (the event queue?)
-		if self.turn_button.left_mouse_released(mouse_pos=mouse_pos): # if button was pressed
-			if self.game_type == 'SP':
-				self._end_turn(sync=True)
-			elif self.game_type == 'MP':
-				if self.is_current_player_active():
-					self._end_turn(sync=True)
+		# if self.turn_button.left_mouse_released(mouse_pos=mouse_pos): # if button was pressed
+		# 	if self.game_type == 'SP':
+		# 		self._end_turn(sync=True)
+		# 	elif self.game_type == 'MP':
+		# 		if self.is_current_player_active():
+		# 			self._end_turn(sync=True)
 
 	def right_mouse_pressed(self, mouse_pos):
 		# If a cell is selected
@@ -395,6 +392,10 @@ class Field(GameState):
 		while end_of_turn == False:
 			end_of_turn = self._advance_turn(sync=sync)
 
+	def start_act_animations(self):
+		self.act_animating = True
+		self.act_animation_frame_count = 0
+
 	def _advance_turn(self, sync):
 		if self.phase.name == 'Act':
 			for lane in range(self.board.lane_count):
@@ -406,7 +407,7 @@ class Field(GameState):
 						absolute_cell = (cell[0], self.board.rank_count-1-cell[1]) # Corrected for player orientation (actual grid coords)
 
 					building_card = self.board.building_cards[absolute_cell]
-					unit_card = self.board.unit_cards[absolute_cell] # relative to player view (your closest rank is 0, furthest is board.rank_count-1)
+					unit_card = self.board.get_unit_in_cell(cell=absolute_cell)
 
 					if building_card != None and building_card.owner == self.player_turn:
 						building_card.act()
@@ -422,10 +423,12 @@ class Field(GameState):
 					elif self.player_turn == 1:
 						cell = (lane_number, 0)
 
-					self.board.place_card(cell=cell, card=queued_card, owner=self.player_turn, sync=sync)
+					queued_card.place_queued()
+					#self.board.place_card(cell=cell, card=queued_card, owner=self.player_turn, sync=sync)
 					self.board.queued_cards[self.player_number][lane_number] = None
 
 			self.board.refresh_fow()
+			self.start_act_animations()
 
 		if sync == True:
 			send_string = 'phase advanced' + ';[END]'
@@ -434,11 +437,29 @@ class Field(GameState):
 		self.phase.advance_phase()
 
 		if self.phase.turn_ended == True:
-			for card in self.board:
-				if card == None: continue
-				card.end_turn()
-			self.phase.end_turn()
-			self.swap_active_player()
+			if self.act_animating is True:
+				for card in self.board:
+					if card == None: continue
+					card.end_turn()
+				self.phase.end_turn()
+				self.swap_active_player()
+				self.hands[self.player_turn].add_random_cards(count=1)
+
+				if self.game_type == 'SP' and self.player_turn == 1:
+					# Single player and it's the computer's turn.
+					# For now, we just want to play 1 random card from their hand to a random square on the board and end their turn.
+					hand = self.hands[self.player_turn]
+					card = hand.cards.pop(random.randrange(0,hand.card_count))
+					cell_x = random.randrange(0, self.board.size[0])
+					cell_y = random.randrange(0, self.board.size[1])
+
+					dont_queue = False
+					if isinstance(card, BuildingCard):
+						if self.board.building_cards[(cell_x,cell_y)] is not None:
+							dont_queue = True
+
+					if dont_queue is False:
+						card.queue(board=self.board, cell=(cell_x,cell_y), owner=1)
 			return True
 		else:
 			return False
@@ -558,8 +579,8 @@ class Field(GameState):
 		# Draw queued cards
 		for lane_number, queued_card in enumerate(self.board.queued_cards[self.player_number]):
 			if queued_card != None:
-				pos = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('center','down'))
-				pos[0] -= c.board_card_size[0]//2
+				pos = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('left','down'))
+				pos[0] += c.board_card_size[0]
 				queued_card.draw(pos=pos, location='queue')
 
 		self._draw_action_panel()
@@ -637,8 +658,8 @@ class Field(GameState):
 					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos())
 					if cell != None:
 						lane = cell[0]
-						lane_down_center = self.board.grid.get_cell_pos(cell=(lane, self.board.size[1]-1), align=('center','down'))
-						lane_down_center[0] -= c.board_card_size[0]//2
+						lane_down_center = self.board.grid.get_cell_pos(cell=(lane, self.board.size[1]-1), align=('left','down'))
+						lane_down_center[0] += c.board_card_size[0]
 						self.drag_card.draw(pos=lane_down_center, location="board_hover")
 						drawn_in_board = True
 				elif isinstance(self.drag_card, BuildingCard):
@@ -650,11 +671,11 @@ class Field(GameState):
 							pos = (cell[0],self.board.size[1]-1-cell[1])
 
 						if self.board.building_cards[pos] == None:
-							cell_top_center = self.board.grid.get_cell_pos(cell, align=('center','top'))
-							cell_top_center[0] -= c.board_card_size[0]//2
+							cell_top_center = self.board.grid.get_cell_pos(cell, align=('left','top'))
 							self.drag_card.draw(cell_top_center, "board_hover")
 							drawn_in_board = True
 
 			if drawn_in_board == False:
 				mouse_coords = pg.mouse.get_pos()
-				self.drag_card.draw(mouse_coords - self.card_grab_point, "hand")
+				pos = (mouse_coords[0] - self.card_grab_point[0], mouse_coords[1] - self.card_grab_point[1])
+				self.drag_card.draw(pos, "hand")

@@ -46,7 +46,20 @@ class Card:
 
 		self.queue_lane = None
 
-	@d.info
+	@property
+	def cell(self):
+		return self._cell
+
+	@cell.setter
+	def cell(self, value):
+		self._cell = value
+
+
+	def remove_from_board(self):
+		self.board = None
+		self.cell = None
+		self.activated = False
+
 	def queue(self, board, cell, owner):
 		lane = cell[0]
 		active_queue = board.queued_cards[owner] # Queue of the active player
@@ -63,20 +76,21 @@ class Card:
 
 	# @d.info
 	def unqueue(self):
-		self.board.queued_cards[self.owner][self.queue_lane] = None
-		self.board.field.active_hand.add_card(name=self.name)
+		if self.queue_lane is not None:
+			self.board.queued_cards[self.owner][self.queue_lane] = None
+			self.board.field.active_hand.add_card(name=self.name)
 
 	def place_queued(self):
 		if self.queue_lane == None: return
 
-		active_queue = board.queued_cards[self.owner]
-		target_rank = board.get_front_rank(player=self.owner)
+		active_queue = self.board.queued_cards[self.owner]
+		target_rank = self.board.get_front_rank(player=self.owner)
 		target_lane = self.queue_lane
 		target_cell = (target_lane, target_rank)
 
 		# If the target cell is empty, place this card there; otherwise, do nothing
-		if self.board.unit_cards[target_cell] == None:
-			self.board.unit_cards[target_cell] = self
+		if self.board.get_unit_in_cell(cell=target_cell) is None:
+			self.board.set_unit_in_cell(cell=target_cell, card=self)
 			self.cell = target_cell
 			self.queue_lane = None
 			self.activated = True
@@ -85,7 +99,6 @@ class Card:
 		self.cell = cell
 		self.board = board
 		self.owner = owner
-		self.sub_board[cell] = self
 
 		self.activated = True
 
@@ -129,7 +142,7 @@ class Card:
 			cells = self.board.grid.get_cells_in_directions(start_cell=self.cell,
 															distances=distance_dict)
 		else:
-			cells = [self.pos]
+			cells = [self.cell]
 
 		return cells
 
@@ -185,14 +198,14 @@ class Card:
 
 		if self.board == True:
 			# This should always be False, but check just in case
-			if self != self.sub_board[self.pos]:
-				print('something about board/pos state in card is wrong')
+			if self != self.sub_board[self.cell]:
+				print('something about board/cell state in card is wrong')
 				return
 
-			self.sub_board[self.pos] = None
+			self.sub_board[self.cell] = None
 			# These don't really matter atm because hand.add_card() pulls a copy from card pool, but futureproofing
 			self.board = None
-			self.pos = None
+			self.cell = None
 
 		hand.add_card(name=self.name)
 
@@ -214,10 +227,10 @@ class Card:
 
 	def _generate_hand_surface(self):
 		bg_color = c.dark_grey
-		# if self.owner == 0:
-		# 	bg_color = c.dark_red
-		# elif self.owner == 1:
-		# 	bg_color = c.dark_blue
+		if self.owner == 0:
+			bg_color = c.dark_red
+		elif self.owner == 1:
+			bg_color = c.dark_blue
 
 		self._hand_surface = pg.Surface(c.hand_card_size)
 
@@ -336,11 +349,6 @@ class BuildingCard(Card):
 		if self.activated == False: return [] # Don't show on the map if the building isn't built yet
 		return Card.visible_cells(self)
 
-	@property
-	def sub_board(self):
-		if self.board == None: return
-		return self.board.building_cards
-
 
 	@property
 	def activated(self):
@@ -426,10 +434,10 @@ class CreatureCard(Card):
 	# def board(self, value):
 	# 	self._board = value
 
-	@property
-	def sub_board(self):
-		if self.board == None: return
-		return self.board.unit_cards
+	# @property
+	# def sub_board(self):
+	# 	if self.board == None: return
+	# 	return self.board.unit_cards
 
 	def _generate_hand_surface(self):
 		Card._generate_hand_surface(self)
@@ -495,8 +503,9 @@ class BuilderCard(CreatureCard):
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
 	def unqueue(self):
-		self.board.queued_cards[self.owner][self.queue_lane] = None
-		self.board.field.active_hand.add_card(name=self.target_building.name)
+		if self.queue_lane is not None:
+			self.board.queued_cards[self.owner][self.queue_lane] = None
+			self.board.field.active_hand.add_card(name=self.target_building.name)
 
 	@property
 	def target_building(self):
@@ -521,28 +530,27 @@ class BuilderCard(CreatureCard):
 
 		if self.board == True:
 			# This should always be False, but check just in case
-			if self != self.sub_board[self.pos]:
+			if self != self.sub_board[self.cell]:
 				print('something about board/pos state in card is wrong')
 				return
 
-			self.sub_board[self.pos] = None
+			self.sub_board[self.cell] = None
 			# These don't really matter atm because hand.add_card() pulls a copy from card pool, but futureproofing
 			self.board = None
-			self.pos = None
+			self.cell = None
 
 			# Builder card should just be deleted, and not returned to hand
 
 	def draw(self, pos, location, hover=False):
 		# Draw target pending building
 		if location == 'board' or location == 'queue':
-			building_pos = self.board.grid.get_cell_pos(cell=self.target_cell, align=('center','up'))
-			building_pos[0] -= c.board_card_size[0]//2
+			building_pos = self.board.grid.get_cell_pos(cell=self.target_cell, align=('left','up'))
 
+			#if self.board.field.player_number == self.owner:
 			self.target_building.draw(pos=building_pos, location='board')
 
 		Card.draw(self=self, pos=pos, location=location, hover=hover)
 
-	@d.info
 	def clone(self):
 		return BuilderCard(	name = self.name,
 							cost = self.cost,

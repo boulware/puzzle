@@ -171,122 +171,122 @@ class Label(Element):
 		draw.draw_surface_aligned(target=screen, source=self.surface, pos=self.pos, align=self.align)
 
 class Node:
-			def __init__(self, name, value, parent=None, expanded=False):
-				self.name = name
-				self.value = value
-				self.parent = parent
-				self.expanded = expanded
+	def __init__(self, name, value, parent=None, expanded=False):
+		self.name = name
+		self.value = value
+		self.parent = parent
+		self.expanded = expanded
 
-				self.children = []
+		self.children = []
 
-				if parent is not None:
-					parent.add_child(self)
+		if parent is not None:
+			parent.add_child(self)
 
-			def set_value(self, value):
-				self.value = value
+	def set_value(self, value):
+		self.value = value
 
-				try:
-					if isinstance(self.parent.value, (list,dict,np.ndarray)):
-						self.parent.value[self.name] = value
-					else:
-						setattr(self.parent.value, self.name, value)
-				except AttributeError as error:
-					# Attribute has no setter, so do nothing
-					pass
-				except TypeError as error:
-					# try:
-						#print(f'lvl 2 (name={self.parent.name}): {e}')
-						# The parent type doesn't support __setitem__ (as indexing), so we assume it's a tuple?
-						# I think I'll ducktype all my classes for __getitem__ and __setitem__ to call getattr()/setattr()
+		try:
+			if isinstance(self.parent.value, (list,dict,np.ndarray)):
+				self.parent.value[self.name] = value
+			else:
+				setattr(self.parent.value, self.name, value)
+		except AttributeError as error:
+			# Attribute has no setter, so do nothing
+			pass
+		except TypeError as error:
+			# try:
+				#print(f'lvl 2 (name={self.parent.name}): {e}')
+				# The parent type doesn't support __setitem__ (as indexing), so we assume it's a tuple?
+				# I think I'll ducktype all my classes for __getitem__ and __setitem__ to call getattr()/setattr()
 
-						# If the parent is a tuple, we have to go one level above to search for a mutable type (list, dict, obj):
-						# Then after we look one level up, if it's still not mutable, we go up a level again, u.s.w
+				# If the parent is a tuple, we have to go one level above to search for a mutable type (list, dict, obj):
+				# Then after we look one level up, if it's still not mutable, we go up a level again, u.s.w
 
-						node = self
-						parent = self.parent
-						temp_list = list(parent.value)
-						temp_list[node.name] = value
+				node = self
+				parent = self.parent
+				temp_list = list(parent.value)
+				temp_list[node.name] = value
 
-						mutable_found = False
-						while mutable_found is False:
-							node = parent
-							parent = node.parent
-							try:
-								if isinstance(parent.value, (list,dict,np.ndarray,tuple)):
-									parent.value[node.name] = tuple(temp_list)
-								else:
-									setattr(parent.value, node.name, tuple(temp_list))
+				mutable_found = False
+				while mutable_found is False:
+					node = parent
+					parent = node.parent
+					try:
+						if isinstance(parent.value, (list,dict,np.ndarray,tuple)):
+							parent.value[node.name] = tuple(temp_list)
+						else:
+							setattr(parent.value, node.name, tuple(temp_list))
 
-								mutable_found = True
-							except TypeError as error:
-								new_temp_list = list(parent.value)
-								if isinstance(parent.value, (list,dict,np.ndarray,tuple)):
-									new_temp_list[parent.name] = tuple(temp_list)
-								else:
-									setattr(parent.value, parent.name, tuple(temp_list))
-								temp_list = new_temp_list
-					# except (TypeError, AttributeError) as error:
-					# 	d.print_callstack()
-					# 	print(Fore.YELLOW + f"Unable to set attribute \'{node.name}\' on {parent.value}")
-					# 	print(Fore.RED + f"{type(parent.value).__name__} may not be ducktyped for __getattr__() or __setattr__()")
-					# 	print(Fore.MAGENTA + f"error: {error}")
+						mutable_found = True
+					except TypeError as error:
+						new_temp_list = list(parent.value)
+						if isinstance(parent.value, (list,dict,np.ndarray,tuple)):
+							new_temp_list[parent.name] = tuple(temp_list)
+						else:
+							setattr(parent.value, parent.name, tuple(temp_list))
+						temp_list = new_temp_list
+			# except (TypeError, AttributeError) as error:
+			# 	d.print_callstack()
+			# 	print(Fore.YELLOW + f"Unable to set attribute \'{node.name}\' on {parent.value}")
+			# 	print(Fore.RED + f"{type(parent.value).__name__} may not be ducktyped for __getattr__() or __setattr__()")
+			# 	print(Fore.MAGENTA + f"error: {error}")
 
-			def add_child(self, child):
-				self.children.append(child)
+	def add_child(self, child):
+		self.children.append(child)
 
-			def get_indexable_attributes(self):
-				# Returns list of attributes accessible by [] ('__getitem__')
+	def get_indexable_attributes(self):
+		# Returns list of attributes accessible by [] ('__getitem__')
 
+		attribute_names = []
+
+		if isinstance(self.value, (tuple,list)):
+			for index, _ in enumerate(self.value):
+				attribute_names.append(index)
+		elif isinstance(self.value, np.ndarray):
+			for index, _ in np.ndenumerate(self.value):
+				attribute_names.append(index)
+		elif isinstance(self.value, dict):
+			for key, value in self.value.items():
+				attribute_names.append(key)
+		else:
+			try:
+				members = inspect.getmembers(self.value, lambda a:not(inspect.isroutine(a)))
+				for member_name, _ in [a for a in members if not(a[0].startswith('__') and a[0].endswith('__'))]:
+					attribute_names.append(member_name)
+			except TypeError as e:
 				attribute_names = []
 
-				if isinstance(self.value, (tuple,list)):
-					for index, _ in enumerate(self.value):
-						attribute_names.append(index)
-				elif isinstance(self.value, np.ndarray):
-					for index, _ in np.ndenumerate(self.value):
-						attribute_names.append(index)
-				elif isinstance(self.value, dict):
-					for key, value in self.value.items():
-						attribute_names.append(key)
-				else:
-					try:
-						members = inspect.getmembers(self.value, lambda a:not(inspect.isroutine(a)))
-						for member_name, _ in [a for a in members if not(a[0].startswith('__') and a[0].endswith('__')) if not(a[0].startswith('_'))]:
-							attribute_names.append(member_name)
-					except TypeError as e:
-						attribute_names = []
+		return attribute_names
 
-				return attribute_names
+	def load_children(self):
+		self.children = []
 
-			def load_children(self):
-				self.children = []
+		attribute_names = self.get_indexable_attributes()
 
-				attribute_names = self.get_indexable_attributes()
+		if len(attribute_names) == 0:
+			self.expanded = False
 
-				if len(attribute_names) == 0:
-					self.expanded = False
+		if isinstance(self.value, (list,dict,np.ndarray,tuple)):
+			for name in attribute_names:
+				Node(name=name, value=self.value[name], parent=self)
+		else:
+			for name in attribute_names:
+				Node(name=name, value=getattr(self.value, name), parent=self)
 
-				if isinstance(self.value, (list,dict,np.ndarray,tuple)):
-					for name in attribute_names:
-						Node(name=name, value=self.value[name], parent=self)
-				else:
-					for name in attribute_names:
-						Node(name=name, value=getattr(self.value, name), parent=self)
+	def refresh_children(self):
+		if len(self.get_indexable_attributes()) != len(self.children):
+			self.load_children()
 
-			def refresh_children(self):
-				if len(self.get_indexable_attributes()) != len(self.children):
-					self.load_children()
-
-				if isinstance(self.value, (list,dict,np.ndarray,tuple)):
-					for child in self.children:
-						child.value = self.value[child.name]
-						if child.expanded is True:
-							child.refresh_children()
-				else:
-					for child in self.children:
-						child.value = getattr(self.value, child.name)
-						if child.expanded is True:
-							child.refresh_children()
+		if isinstance(self.value, (list,dict,np.ndarray,tuple)):
+			for child in self.children:
+				child.value = self.value[child.name]
+				if child.expanded is True:
+					child.refresh_children()
+		else:
+			for child in self.children:
+				child.value = getattr(self.value, child.name)
+				if child.expanded is True:
+					child.refresh_children()
 
 
 class TreeView(Element):
@@ -501,6 +501,10 @@ class TreeView(Element):
 	def draw(self, target=draw.screen):
 		self.current_list = []
 		self._generate_current_list()
+
+		for node in self.pinned_nodes:
+			if node.parent is not None:
+				node.parent.refresh_children()
 
 		for i, depth_pair in enumerate(self.current_list):
 			node = depth_pair[0]

@@ -32,3 +32,16 @@ class Hand:
 
 	def clear_hand(self):
 		self.cards = []
+
+	def add_random_cards(self, count=1):
+		for _ in range(count):
+			self.cards.append(self.field.game.card_pool.get_random_card())
+
+class Deck:
+	def __init__(self, field):
+		self.field = field
+		self.cards = []
+
+	def add_random_cards(self, count):
+		for i in range(count):
+			self.cards.append(self.field.game.card_pool.get_random_card())

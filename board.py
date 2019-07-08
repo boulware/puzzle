@@ -3,6 +3,8 @@ from card import BuildingCard, BuilderCard, CreatureCard
 import constants as c
 import pygame as pg
 import draw
+import debug as d
+import util
 
 class Grid:
 	def __init__(self, dimensions, origin, cell_size):
@@ -218,7 +220,7 @@ class Board:
 
 		self.size = size
 		self.building_cards = np.full(size, None, np.dtype(BuildingCard))
-		self.unit_cards = np.full(size, None, np.dtype(CreatureCard))
+		self._unit_cards = np.full(size, None, np.dtype(CreatureCard))
 		grid_origin = (c.screen_size[0]//2-int((size[0]*c.node_size[0])//2), c.screen_size[1]//2-int((size[1]*c.node_size[1])//2))
 		self.grid = Grid(dimensions=size, origin=grid_origin, cell_size=c.node_size)
 
@@ -229,9 +231,17 @@ class Board:
 
 		self.selected_unit = None
 		self._selected_cell = None
-		print('board created')
 		player_count = 2
 		self.queued_cards = [[None]*c.grid_count[0] for i in range(player_count)]
+
+
+	def get_unit_in_cell(self, cell):
+		if self.check_cell_valid(cell=cell) is True:
+			return self._unit_cards[cell]
+
+	def set_unit_in_cell(self, cell, card):
+		if self.check_cell_valid(cell=cell) is True:
+			self._unit_cards[cell] = card
 
 	@property
 	def selected_cell(self):
@@ -240,12 +250,12 @@ class Board:
 	@selected_cell.setter
 	def selected_cell(self, value):
 		if value is not None:
-			self.selected_unit = self.unit_cards[value]
+			self.selected_unit = self._unit_cards[value]
 			self._selected_cell = value
 
 
 	def __iter__(self):
-		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self.unit_cards)])
+		return iter([card_group[x,y] for x in range(self.size[0]) for y in range(self.size[1]) for card_group in (self.building_cards, self._unit_cards)])
 
 	def is_cell_revealed(self, cell, player):
 		if cell in self._fow_visible_cells[player]:
@@ -308,8 +318,9 @@ class Board:
 			surface.set_colorkey(c.pink)
 
 		# The cells that are visible by default (closest 2 ranks to your side, as of writing this comment)
-		p0_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-2,self.size[1])]
-		p1_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(0,2)]
+		fow_rank_count = 6
+		p0_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-fow_rank_count,self.size[1])]
+		p1_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(0,fow_rank_count)]
 
 		# for card in self:
 		# 	if card != None and card.owner == player_perspective:
@@ -344,8 +355,12 @@ class Board:
 		self.place_card(cell=cell, card=building_card, owner=owner, sync=False)
 
 	def place_card(self, cell, card, owner, sync):
-		if self.check_cell_valid(cell) == True and card != None:
+		if self.check_cell_valid(cell) is True and card is not None:
 			card.place(board=self, cell=cell, owner=owner)
+			if isinstance(card, BuildingCard):
+				self.building_cards[cell] = card
+			else:
+				self.set_unit_in_cell(cell=cell, card=card)
 
 			if sync == True:
 				send_string = 'card placed;' + card.name + ';' + str(cell[0]) + ';' + str(cell[1]) + ';' + str(owner) + ';[END]'
@@ -358,13 +373,13 @@ class Board:
 			return False
 
 	def delete_unit_from_board(self, cell, sync):
-		if self.unit_cards[cell] != None:
-			self.unit_cards[cell] = None
-			self.refresh_fow()
+		self._unit_cards[cell].remove_from_board()
+		self._unit_cards[cell] = None
+		self.refresh_fow()
 
-			if sync == True:
-				send_string = 'unit deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
-				self.field.game.queue_network_data(send_string.encode('utf-8'))
+		if sync == True:
+			send_string = 'unit deleted;' + str(cell[0]) + ';' + str(cell[1]) + ';[END]'
+			self.field.game.queue_network_data(send_string.encode('utf-8'))
 
 	def delete_building_from_board(self, cell, sync):
 		if self.building_cards[cell] != None:
@@ -378,10 +393,11 @@ class Board:
 	def move_unit(self, start_cell, target_cell, sync):
 		if self.check_cell_valid(start_cell) == False or self.check_cell_valid(target_cell) == False: return
 
-		if self.unit_cards[target_cell] == None:
-			card = self.unit_cards[start_cell]
-			self.place_card(cell=target_cell, card=card, owner=card.owner, sync=sync)
-			self.delete_unit_from_board(start_cell, sync=sync)
+		if self._unit_cards[target_cell] == None:
+			card = self._unit_cards[start_cell]
+			card.cell = target_cell
+			self._unit_cards[start_cell] = None
+			self._unit_cards[target_cell] = card
 
 		if sync == True:
 			send_string = 'unit moved;' + 	str(start_cell[0]) + ';' + str(start_cell[1]) + ';' + str(target_cell[0]) + ';' + str(target_cell[1]) + ';[END]'
@@ -413,8 +429,8 @@ class Board:
 
 	def fight_cards(self, attacker_cell, defender_cell, sync):
 		try:
-			attacker = self.unit_cards[attacker_cell]
-			defender = self.unit_cards[defender_cell]
+			attacker = self._unit_cards[attacker_cell]
+			defender = self._unit_cards[defender_cell]
 
 			defender.change_health(-attacker.power)
 			attacker.change_health(-defender.power)
@@ -492,10 +508,16 @@ class Board:
 		# (Draw unit cards on top of building cards)
 		for card in self:
 			if card != None:
+				if isinstance(card, BuildingCard) and card.activated is False:
+					pass # Don't draw enemy's pending buildings (pass'd for now)
 				if card.cell in self._fow_visible_cells[player_perspective]:
 					cell_x, cell_y = card.cell
 					if player_perspective == 1:
 						cell_y = self.size[1] - 1 - cell_y
-					card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('center','top'))
-					card_pos[0] -= c.board_card_size[0]//2
+					card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('left','top'))
+					if isinstance(card, BuildingCard):
+						pass
+					else:
+						card_pos[0] += c.board_card_size[0]
+
 					card.draw(card_pos, 'board')

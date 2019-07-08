@@ -6,6 +6,7 @@ import functools
 import copy
 import pygame as pg
 import constants as c
+import time
 
 colorama.init(autoreset=True)
 
@@ -23,8 +24,23 @@ def info(func):
 			kwargs_repr = [f"{k}={v!r}" for k, v in kwargs.items()]
 			signature = ", ".join(args_repr + kwargs_repr)
 
-			print(f"{inspect.getfile(func)}:{stack[2].lineno}->" + Fore.RED + f"{func.__name__}" + Fore.YELLOW + f"({signature})")
+			frame = inspect.stack()[1]
+			module = inspect.getmodule(frame[0])
+			filename = module.__file__
+			print(f"{filename}:{stack[1].lineno}->" + Fore.RED + f"{func.__name__}" + Fore.YELLOW + f"({signature})")
 		return func(*args, **kwargs)
+
+	return wrapper
+
+def time_me(func):
+	@functools.wraps(func)
+	def wrapper(*args, **kwargs):
+		start_time = time.clock()
+		return_value = func(*args, **kwargs)
+		end_time = time.clock()
+		dt = end_time - start_time
+		print(f"{func.__name__}: {dt*pow(10,3):.3f} ms")
+		return return_value
 
 	return wrapper
 
@@ -95,20 +111,6 @@ class DebugUI:
 
 	def update(self, dt, mouse_pos):
 		self.displayed_strings = []
-		if self.game.state.__class__.__name__ == 'Field':
-			board = self.game.state.board
-			if board.selected_cell is not None:
-				selected_unit = board.unit_cards[board.selected_cell]
-				selected_building = board.building_cards[board.selected_cell]
-				if selected_unit is not None:
-					pass#self.write(f"unit: {selected_unit.name}")
-				if selected_building is not None:
-					pass#self.write(f"unit: {selected_building.name}")
-			if self.game.state.drag_card is not None:
-				pass#self.write(f"{self.game.state.drag_card.name}")
-
-			for card in self.game.state.active_hand:
-				pass#self.write(f"{card.name}; board={card.board}")
 
 	def draw(self):
 		if self.active == False: return
@@ -130,14 +132,17 @@ class DebugUI:
 		self.test_treeview.draw(target=screen)
 
 	def any_key_pressed(self, key, mod, unicode_key):
-		self.test_treeview.any_key_pressed(key=key, mod=mod, unicode_key=unicode_key)
 		if key == pg.K_d and mod == pg.KMOD_LCTRL:
 			self.active = not self.active
-		elif key == pg.K_PLUS and mod == pg.KMOD_LCTRL:
-			global active_print
-			active_print = not active_print
-		elif key == pg.K_t and mod == pg.KMOD_LCTRL:
-			if self.bg_alpha != 255:
-				self.bg_alpha = 255
-			else:
-				self.bg_alpha = 0
+
+		# Only allow the ctrl+d to enable or disable the debug interface if it's "deactivated"
+		if self.active is True:
+			self.test_treeview.any_key_pressed(key=key, mod=mod, unicode_key=unicode_key)
+			if key == pg.K_PLUS and mod == pg.KMOD_LCTRL:
+				global active_print
+				active_print = not active_print
+			elif key == pg.K_t and mod == pg.KMOD_LCTRL:
+				if self.bg_alpha != 255:
+					self.bg_alpha = 255
+				else:
+					self.bg_alpha = 0
