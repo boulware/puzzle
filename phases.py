@@ -5,7 +5,7 @@ class Phase:
 		self.names = phase_names
 		self.ID = initial_phase_ID
 		self.turn_ended = False
-	
+
 	def __iter__(self):
 		return iter(self.names)
 
@@ -64,7 +64,7 @@ class TurnDisplay:
 	def phase(self, new_phase):
 		self._phase = new_phase
 		self._generate_phase_texts()
-	
+
 	def _generate_phase_texts(self):
 		self.phase_texts = []
 		self.phase_active_texts = []
@@ -75,10 +75,17 @@ class TurnDisplay:
 
 	def draw(self, target, pos):
 		line_spacing = self.font.get_linesize()
-		for phase_ID, _ in enumerate(self.phase):
+		line_number = 0
+		for phase_ID, phase_name in enumerate(self.phase):
+			if phase_name[0] == '_':
+				# Phases that start with '_' are special phases that the game knows about,
+				# but aren't displayed on the turn display
+				continue
+
 			if phase_ID == self.phase.ID:
 				text_set = self.phase_active_texts # Draw from the active text set
 			else:
 				text_set = self.phase_texts # Draw from non-active text set
 
-			target.blit(text_set[phase_ID], (pos[0],pos[1]+line_spacing*phase_ID))
+			target.blit(text_set[phase_ID], (pos[0],pos[1]+line_spacing*line_number))
+			line_number += 1

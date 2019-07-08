@@ -12,7 +12,8 @@ class Card:
 		self.name = name
 		self.cost = cost
 		self.board = None
-		self.cell = None
+		self._cell = None
+		self.previous_cell = None # Used for sliding animatino between cells when moving
 		self._owner = None
 
 		self.active_actions = {}
@@ -52,8 +53,8 @@ class Card:
 
 	@cell.setter
 	def cell(self, value):
+		self.previous_cell = self._cell
 		self._cell = value
-
 
 	def remove_from_board(self):
 		self.board = None
@@ -61,9 +62,10 @@ class Card:
 		self.activated = False
 
 	def queue(self, board, cell, owner):
+		"""Places the card in the appropriate queue_lane for the given board, cell, and owner"""
 		lane = cell[0]
 		active_queue = board.queued_cards[owner] # Queue of the active player
-		previous_card = active_queue[lane] # Card in the lane queue already
+		previous_card = active_queue[lane] # This is the card that was previously in the queue ane, to be removed
 
 		# If there's a card already in the queue, unqueue it
 		if previous_card != None:
@@ -74,7 +76,6 @@ class Card:
 		self.owner = owner
 		self.queue_lane = lane
 
-	# @d.info
 	def unqueue(self):
 		if self.queue_lane is not None:
 			self.board.queued_cards[self.owner][self.queue_lane] = None

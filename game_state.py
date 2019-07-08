@@ -231,7 +231,7 @@ class Field(GameState):
 		self.hand_area_height = 80
 
 
-		self.phase = Phase(['Build','Act'])
+		self.phase = Phase(['Build','Act',"_ActAnimate"])
 		self.turn_display = TurnDisplay(self.phase, fonts.ui_font)
 
 		self.hand_origin = self.board.grid.get_grid_pos(align=('left','down'),offset=(0,50))
@@ -240,6 +240,7 @@ class Field(GameState):
 		self.drag_card = None
 		self.card_grab_point = None
 		self.act_animating = False
+		self.act_animation_frame_count = 0
 
 
 		self.player_count = 2
@@ -311,7 +312,8 @@ class Field(GameState):
 
 	def space_pressed(self):
 		if self.game_type == 'SP' or self.is_current_player_active():
-			self._advance_turn(sync=True)
+			if self.phase.name != '_ActAnimate':
+				self._advance_turn(sync=True)
 
 	@property
 	def action_panel_rect(self):
@@ -428,7 +430,8 @@ class Field(GameState):
 					self.board.queued_cards[self.player_number][lane_number] = None
 
 			self.board.refresh_fow()
-			self.start_act_animations()
+			self.act_animating = True
+			self.act_animation_frame_count = 0
 
 		if sync == True:
 			send_string = 'phase advanced' + ';[END]'
@@ -437,29 +440,29 @@ class Field(GameState):
 		self.phase.advance_phase()
 
 		if self.phase.turn_ended == True:
-			if self.act_animating is True:
-				for card in self.board:
-					if card == None: continue
+			for card in self.board:
+				if card is not None:
 					card.end_turn()
-				self.phase.end_turn()
-				self.swap_active_player()
-				self.hands[self.player_turn].add_random_cards(count=1)
 
-				if self.game_type == 'SP' and self.player_turn == 1:
-					# Single player and it's the computer's turn.
-					# For now, we just want to play 1 random card from their hand to a random square on the board and end their turn.
-					hand = self.hands[self.player_turn]
-					card = hand.cards.pop(random.randrange(0,hand.card_count))
-					cell_x = random.randrange(0, self.board.size[0])
-					cell_y = random.randrange(0, self.board.size[1])
+			self.phase.end_turn()
+			self.swap_active_player()
+			self.hands[self.player_turn].add_random_cards(count=1)
 
-					dont_queue = False
-					if isinstance(card, BuildingCard):
-						if self.board.building_cards[(cell_x,cell_y)] is not None:
-							dont_queue = True
+			if self.game_type == 'SP' and self.player_turn == 1:
+				# Single player and it's the computer's turn.
+				# For now, we just want to play 1 random card from their hand to a random square on the board and end their turn.
+				hand = self.hands[self.player_turn]
+				card = hand.cards.pop(random.randrange(0,hand.card_count))
+				cell_x = random.randrange(0, self.board.size[0])
+				cell_y = random.randrange(0, self.board.size[1])
 
-					if dont_queue is False:
-						card.queue(board=self.board, cell=(cell_x,cell_y), owner=1)
+				dont_queue = False
+				if isinstance(card, BuildingCard):
+					if self.board.building_cards[(cell_x,cell_y)] is not None:
+						dont_queue = True
+
+				if dont_queue is False:
+					card.queue(board=self.board, cell=(cell_x,cell_y), owner=1)
 			return True
 		else:
 			return False
@@ -558,7 +561,12 @@ class Field(GameState):
 
 	def update(self, dt, mouse_pos):
 		self._generate_hovered_card_index(mouse_pos)
-		# self.turn_button.update(dt, mouse_pos)
+		if self.act_animating is True:
+			self.act_animation_frame_count += 1
+
+			if self.act_animation_frame_count > 60:
+				self.act_animating = False
+				self._advance_turn(sync=False)
 
 	def draw(self):
 		if self.player_number == 0:
@@ -574,7 +582,11 @@ class Field(GameState):
 			active_player_color = c.blue
 
 		# Draw board
-		self.board.draw(screen=self.game.screen, player_perspective=self.player_number)
+		if self.act_animating:
+			t = (self.act_animation_frame_count / 60)
+			self.board.draw(screen=self.game.screen, player_perspective=self.player_number, animation_interp_factor=t)
+		else:
+			self.board.draw(screen=self.game.screen, player_perspective=self.player_number)
 
 		# Draw queued cards
 		for lane_number, queued_card in enumerate(self.board.queued_cards[self.player_number]):
