@@ -241,7 +241,8 @@ class Field(GameState):
 		self.card_grab_point = None
 		self.act_animating = False
 		self.act_animation_frame_count = 0
-
+		self.total_animation_frame_count = 30
+		self.animation_jerk = 0.4
 
 		self.player_count = 2
 
@@ -560,11 +561,12 @@ class Field(GameState):
 		draw.screen.blit(action_panel_surface, self.action_panel_rect.topleft)
 
 	def update(self, dt, mouse_pos):
-		self._generate_hovered_card_index(mouse_pos)
+		self.board.update(dt=dt, mouse_pos=mouse_pos)
+		self._generate_hovered_card_index(mouse_pos=mouse_pos)
 		if self.act_animating is True:
 			self.act_animation_frame_count += 1
 
-			if self.act_animation_frame_count > 60:
+			if self.act_animation_frame_count > self.total_animation_frame_count:
 				self.act_animating = False
 				self._advance_turn(sync=False)
 
@@ -581,12 +583,7 @@ class Field(GameState):
 		elif self.player_turn == 1:
 			active_player_color = c.blue
 
-		# Draw board
-		if self.act_animating:
-			t = (self.act_animation_frame_count / 60)
-			self.board.draw(screen=self.game.screen, player_perspective=self.player_number, animation_interp_factor=t)
-		else:
-			self.board.draw(screen=self.game.screen, player_perspective=self.player_number)
+		self.board.draw(screen=self.game.screen, player_perspective=self.player_number)
 
 		# Draw queued cards
 		for lane_number, queued_card in enumerate(self.board.queued_cards[self.player_number]):

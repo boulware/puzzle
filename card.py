@@ -7,13 +7,33 @@ from font import fonts
 import draw
 import copy
 
+import animation as anim
+
+# class EmptyAnimation:
+# 	def __init__(self, pos):
+# 		self.pos = pos
+
+# 	@property
+# 	def current_pos(self):
+# 		return self.pos
+
+# 	@property
+# 	def finished(self):
+# 		return False
+
+# 	def update(self, dt):
+# 		return self.finished
+
+
+
+
 class Card:
 	def __init__(self, name, cost, visibility, default_action=None):
 		self.name = name
 		self.cost = cost
 		self.board = None
 		self._cell = None
-		self.previous_cell = None # Used for sliding animatino between cells when moving
+		#self.previous_cell = None # Used for sliding animation between cells when moving
 		self._owner = None
 
 		self.active_actions = {}
@@ -21,6 +41,8 @@ class Card:
 		self.current_action = default_action
 
 		self.dirty = True
+
+		self.current_animation = None
 
 		self._hand_surface = None
 		self._board_surface = None
@@ -32,6 +54,7 @@ class Card:
 		self._power = 0
 
 		self.activated = True
+		self.death_queued = False
 
 		# Number of values in visibility
 		# 1 value -> the unit sees that value in all (cardinal?) directions
@@ -75,6 +98,7 @@ class Card:
 		self.board = board
 		self.owner = owner
 		self.queue_lane = lane
+		self.cell = (lane, self.board.get_queue_rank(player=self.owner))
 
 	def unqueue(self):
 		if self.queue_lane is not None:
@@ -88,6 +112,11 @@ class Card:
 		target_rank = self.board.get_front_rank(player=self.owner)
 		target_lane = self.queue_lane
 		target_cell = (target_lane, target_rank)
+
+		start_pos = self.board.get_unit_cell_pos(cell=self.cell)
+		target_pos = self.board.get_unit_cell_pos(cell=target_cell)
+		print(start_pos, target_pos)
+		self.current_animation = anim.MoveAnimation(start_pos=start_pos, end_pos=target_pos, frame_duration=30)
 
 		# If the target cell is empty, place this card there; otherwise, do nothing
 		if self.board.get_unit_in_cell(cell=target_cell) is None:
@@ -297,13 +326,27 @@ class Card:
 		for _, action in self.active_actions.items():
 			action.end_turn()
 
+	def queue_death(self):
+		"""Queue card death after all animations are complete"""
+		self.death_queued = True
+
+	def update(self, dt, mouse_pos):
+		if self.current_animation is not None:
+			if self.current_animation.update(dt=dt) is True:
+				self.current_animation = None
+				if self.death_queued is True:
+					self.board.delete_unit_from_board(cell=self.cell, sync=True)
+
 	def draw(self, pos, location, hover=False):
 		if location == 'hand':
 			draw.screen.blit(self.hand_surface, pos)
 			if hover:
 				pg.draw.rect(draw.screen, c.gold, (pos, self.hand_surface.get_size()), 3)
 		elif location == 'board' or location == 'board_hover':
-			draw.screen.blit(self.board_surface, pos)
+			if self.current_animation is not None:
+				draw.screen.blit(self.board_surface, self.current_animation.current_pos)
+			else:
+				draw.screen.blit(self.board_surface, pos)
 		elif location == 'queue':
 			draw.screen.blit(self.board_surface, pos)
 

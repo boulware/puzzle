@@ -1,4 +1,6 @@
 import debug as d
+import animation as anim
+import constants as c
 
 class Action:
 	def __init__(self, card):
@@ -41,6 +43,7 @@ class MoveAction(Action):
 	def target_cell(self, value):
 		pass
 
+	@d.info
 	def do(self):
 		if self.target_cell == None: return
 
@@ -48,15 +51,54 @@ class MoveAction(Action):
 			pass # If we're trying to move into an invalid cell, do nothing
 
 		target_card = self.board.get_unit_in_cell(cell=self.target_cell)
-		if target_card == None:
+		if target_card is None:
 			# There's no unit in the way; just move to the cell
+
+			start_pos = self.board.grid.get_cell_pos(cell=self.card.cell)
+			start_pos[0] += c.board_card_size[0]
+			end_pos = self.board.grid.get_cell_pos(cell=self.target_cell)
+			end_pos[0] += c.board_card_size[0]
+			self.card.current_animation = anim.MoveAnimation(start_pos=start_pos, end_pos=end_pos, frame_duration=30)
+
 			self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
 		else:
 			pass # If there's a unit in the way and we're just moving (not attack moving), do nothing
 
+class AttackAction(Action):
+	def __init__(self, card):
+		Action.__init__(self=self, card=card)
+
+	@property
+	def target_cell(self):
+		if self.board == None: return
+
+		return self.card.get_front_cell()
+
+	def do(self):
+		if self.target_cell == None: return
+
+		if self.board.check_cell_valid(cell=self.target_cell) == False:
+			pass
+
+		target_card = self.board.get_unit_in_cell(cell=self.target_cell)
+		if target_card is not None:
+			if target_card.owner != self.owner:
+
+				start_pos = self.board.grid.get_cell_pos(cell=self.card.cell)
+				start_pos[0] += c.board_card_size[0]
+				target_pos = self.board.grid.get_cell_pos(cell=self.target_cell)
+				target_pos[0] += c.board_card_size[0]
+				self.card.current_animation = anim.AttackAnimation(start_pos=start_pos, target_pos=target_pos)
+				target_card.current_animation = anim.AttackAnimation(start_pos=target_pos, target_pos=start_pos)
+				self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=target_card.cell, sync=True)
+
+
 class AttackMoveAction(Action):
 	def __init__(self, card):
 		Action.__init__(self=self, card=card)
+
+		self.move_action = MoveAction(card=card)
+		self.attack_action = AttackAction(card=card)
 
 	@property
 	def target_cell(self):
@@ -78,11 +120,13 @@ class AttackMoveAction(Action):
 			target_card = self.board.get_unit_in_cell(cell=self.target_cell)
 			if target_card is None:
 				# There's no unit in the way; just move to the cell
-				self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
+				self.move_action.do()
+				#self.board.move_unit(start_cell=self.card.cell, target_cell=self.target_cell, sync=True)
 			else:
 				# There's a unit in the way; attack if it's owned by the enemy
-				if target_card.owner != self.owner:
-					self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
+				self.attack_action.do()
+				# if target_card.owner != self.owner:
+				# 	self.board.fight_cards(attacker_cell=self.card.cell, defender_cell=self.target_cell, sync=True)
 
 class BuildAction(Action):
 	def __init__(self, card, target_cell=None, target_building=None):

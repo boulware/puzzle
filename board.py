@@ -90,7 +90,6 @@ class Grid:
 		return [(x,y) for x in range(min_x,max_x+1) for y in range(min_y,max_y+1)]
 
 	# Return the cell position. Align lets you choose among the corners, centers of edges, or center. Default params top left corner
-	@d.info
 	def get_cell_pos(self, cell, align=('left','up')):
 		pos = [self.rect[i] + cell[i]*self.cell_size[i] for i in range(2)]
 
@@ -270,16 +269,20 @@ class Board:
 	# ...
 	def get_nth_rank(self, n, player):
 		if player == 0:
-			return util.clamp(self.size[1]-1-n, 0, self.size[1]-1)
+			return self.size[1]-1-n
 		elif player == 1:
-			return util.clamp(n, 0, self.size[1]-1)
+			return n
 		else:
 			print("Invalid player given to get_nth_rank()")
 			return 0
 
-	# Returns rank closest to player
 	def get_front_rank(self, player):
+		"""Returns rank closest to player."""
 		return self.get_nth_rank(n=0, player=player)
+
+	def get_queue_rank(self, player):
+		"""Returns rank where cards are queued (this rank lies outside of the normal board)"""
+		return self.get_nth_rank(n=-1, player=player)
 
 	def check_cell_valid(self, cell):
 		return self.grid.check_cell_valid(cell=cell)
@@ -343,6 +346,10 @@ class Board:
 				cell_pos = self.grid.get_cell_pos(cell=relative_cell, align=('center','center'))
 				cell_pos = [cell_pos[0] - self.grid.origin[0], cell_pos[1] - self.grid.origin[1]]
 				draw.draw_surface_aligned(target=self.fow_surfaces[player], source=transparent_cell, pos=cell_pos, align=('center','center'))
+
+	def get_unit_cell_pos(self, cell):
+		topleft = self.grid.get_cell_pos(cell=cell)
+		return (topleft[0] + c.board_card_size[0], topleft[1])
 
 	@property
 	def lane_count(self):
@@ -437,9 +444,9 @@ class Board:
 			attacker.change_health(-defender.power)
 
 			if defender.health <= 0:
-				self.delete_unit_from_board(cell=defender_cell, sync=sync)
+				defender.queue_death()
 			if attacker.health <= 0:
-				self.delete_unit_from_board(cell=attacker_cell, sync=sync)
+				attacker.queue_death()
 
 			if sync == True:
 				send_string = 'cards fought;' + str(attacker_cell[0]) + ';' + str(attacker_cell[1]) + ';' + str(defender_cell[0]) + ';' + str(defender_cell[1]) + ';[END]'
@@ -496,7 +503,12 @@ class Board:
 		# 		if isinstance(self.cards[cell_coord], CreatureCard):
 		# 			self.cards[cell_coord].apply_buff(power=1,max_health=1)
 
-	def draw(self, screen, player_perspective=0, animation_interp_factor=None):
+	def update(self, dt, mouse_pos):
+		for card in self:
+			if card is not None:
+				card.update(dt=dt, mouse_pos=mouse_pos)
+
+	def draw(self, screen, player_perspective=0):
 		self.grid.draw(screen=screen, color=c.grey, player_perspective=player_perspective)
 
 		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)
@@ -511,34 +523,43 @@ class Board:
 			if card != None:
 				if isinstance(card, BuildingCard) and card.activated is False:
 					pass # Don't draw enemy's pending buildings (pass'd for now)
-				if card.cell in self._fow_visible_cells[player_perspective]:
-					if animation_interp_factor is not None and not isinstance(card, BuildingCard) and card.previous_cell is not None:
-						target_cell = card.cell
-						previous_cell = card.previous_cell
 
-						if player_perspective == 1:
-							target_cell[1] = self.size[1] - 1 - target_cell[1]
-							previous_cell[1] = self.size[1] - 1 - previous_cell[1]
+				cell_x, cell_y = card.cell
+				if player_perspective == 1:
+					cell_y = self.size[1] - 1 - cell_y
+				card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('left','top'))
+				card_pos[0] += c.board_card_size[0]
 
-						target_pos = self.grid.get_cell_pos(cell=target_cell, align=('left', 'top'))
-						target_pos[0] += c.board_card_size[0]
-						previous_pos = self.grid.get_cell_pos(cell=previous_cell, align=('left', 'top'))
-						previous_pos[0] += c.board_card_size[0]
+				card.draw(pos=card_pos, location='board')
+				# if card.cell in self._fow_visible_cells[player_perspective]:
+				# 	if animation_interp_factor is not None and not isinstance(card, BuildingCard) and card.previous_cell is not None and card.owner == self.field.player_turn:
+				# 		target_cell = card.cell
+				# 		previous_cell = card.previous_cell
 
-						t = animation_interp_factor
-						interpolated_pos = ((1-t)*previous_pos[0] + t*target_pos[0], (1-t)*previous_pos[1] + t*target_pos[1])
+				# 		if player_perspective == 1:
+				# 			target_cell[1] = self.size[1] - 1 - target_cell[1]
+				# 			previous_cell[1] = self.size[1] - 1 - previous_cell[1]
 
-						card.draw(interpolated_pos, 'board')
-					else:
-						cell_x, cell_y = card.cell
-						if player_perspective == 1:
-							cell_y = self.size[1] - 1 - cell_y
-						card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('left','top'))
-						if isinstance(card, BuildingCard):
-							# Align the building cards on the left of the cell...
-							pass
-						else:
-							# ... and the unit cards on the right
-							card_pos[0] += c.board_card_size[0]
+				# 		target_pos = self.grid.get_cell_pos(cell=target_cell, align=('left', 'top'))
+				# 		target_pos[0] += c.board_card_size[0]
+				# 		previous_pos = self.grid.get_cell_pos(cell=previous_cell, align=('left', 'top'))
+				# 		previous_pos[0] += c.board_card_size[0]
 
-						card.draw(card_pos, 'board')
+				# 		t = animation_interp_factor
+				# 		jerk = animation_jerk
+				# 		interpolated_pos = ((1-pow(t,jerk))*previous_pos[0] + pow(t,jerk)*target_pos[0], (1-pow(t,jerk))*previous_pos[1] + pow(t,jerk)*target_pos[1])
+
+				# 		card.draw(interpolated_pos, 'board')
+				# 	else:
+				# 		cell_x, cell_y = card.cell
+				# 		if player_perspective == 1:
+				# 			cell_y = self.size[1] - 1 - cell_y
+				# 		card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('left','top'))
+				# 		if isinstance(card, BuildingCard):
+				# 			# Align the building cards on the left of the cell...
+				# 			pass
+				# 		else:
+				# 			# ... and the unit cards on the right
+				# 			card_pos[0] += c.board_card_size[0]
+
+				# 		card.draw(card_pos, 'board')
