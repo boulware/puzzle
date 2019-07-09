@@ -219,8 +219,8 @@ class Field(GameState):
 
 		self.player_number = player_number
 		self.game_type = game_type
-		self.board = Board(self, c.grid_count)
-		self.hands = [Hand(self), Hand(self)]
+		self.board = Board(field=self, size=c.grid_count)
+		self.hands = [Hand(field=self, owner=0), Hand(field=self, owner=1)]
 
 		for hand in self.hands:
 			hand.add_random_cards(count=2)
@@ -282,7 +282,7 @@ class Field(GameState):
 			Input(mouse_button=1, type='release'): lambda mouse_pos: self.left_mouse_released(mouse_pos),
 			Input(mouse_button=3): lambda mouse_pos: self.right_mouse_pressed(mouse_pos),
 			Input(key=pg.K_SPACE): lambda mouse_pos: self.space_pressed(),
-			Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
+			#Input(key=pg.K_2): lambda mouse_pos: self.hands[self.player_turn].add_card("Goblin"),
 			Input(key=pg.K_DELETE): lambda mouse_pos: self.hands[self.player_turn].clear_hand(),
 			Input(key=pg.K_ESCAPE): lambda mouse_pos: self.go_to_main_menu()
 		}
@@ -331,11 +331,13 @@ class Field(GameState):
 			if relative_x >= 0 and relative_x < c.hand_card_size[1]:
 				if clicked_card_index >= 0 and clicked_card_index < self.active_hand.card_count:
 					self.drag_card = self.active_hand.pop_card(clicked_card_index)
+					self.drag_card.board = self.board
+					self.drag_card.location = CardLocation.Drag
 					# d.debugger.print(values={'drag_card': self.drag_card})
 					self.card_grab_point = (relative_x,relative_y)
 
 		if self.board.grid.rect.collidepoint(mouse_pos): # mouse is hovering board
-			self.board.selected_cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+			self.board.selected_cell = self.board.grid.get_cell_at_pos(pos=mouse_pos, player=self.player_number)
 		else:
 			self.board.selected_cell = None
 
@@ -350,14 +352,14 @@ class Field(GameState):
 			placed_in_board = False # True if card is placed onto the board during this mouse release
 
 			if self.is_current_player_active() and self.phase.name == 'Build':
-				cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+				cell = self.board.grid.get_cell_at_pos(pos=mouse_pos, player=self.player_number)
 				if cell != None:
 					# d.debugger.print(values={'drag_card': self.drag_card})
 					self.drag_card.queue(board=self.board, cell=cell, owner=self.player_number)
 					placed_in_board = True
 
 			if placed_in_board == False:
-				self.active_hand.add_card(name=self.drag_card.name)
+				self.active_hand.add_card(card=self.drag_card)
 
 			self.drag_card = None
 			self.card_grab_point = None # Probably not necessary
@@ -376,7 +378,7 @@ class Field(GameState):
 			if self.board.selected_cell != None:
 				selected_building = self.board.building_cards[self.board.selected_cell]
 				if selected_building != None and selected_building.owner == self.player_number and self.is_current_player_active():
-					clicked_cell = self.board.grid.get_cell_at_pos(pos=mouse_pos)
+					clicked_cell = self.board.grid.get_cell_at_pos(pos=mouse_pos, player=self.player_number)
 					selected_building.target_cell = clicked_cell
 					selected_building.act()
 
@@ -562,6 +564,8 @@ class Field(GameState):
 
 	def update(self, dt, mouse_pos):
 		self.board.update(dt=dt, mouse_pos=mouse_pos)
+		if self.drag_card is not None:
+			self.drag_card.update(dt=dt, mouse_pos=mouse_pos)
 		self._generate_hovered_card_index(mouse_pos=mouse_pos)
 		if self.act_animating is True:
 			self.act_animation_frame_count += 1
@@ -590,7 +594,7 @@ class Field(GameState):
 			if queued_card != None:
 				pos = self.board.grid.get_cell_pos(cell=(lane_number, self.board.size[1]-1), align=('left','down'))
 				pos[0] += c.board_card_size[0]
-				queued_card.draw(pos=pos, location='queue')
+				queued_card.draw(pos=pos)
 
 		self._draw_action_panel()
 		if self.board.selected_cell != None:
@@ -630,7 +634,7 @@ class Field(GameState):
 			else:
 				hover = False
 
-			self.active_hand[i].draw(pos=card_pos, location='hand', hover=hover)
+			self.active_hand[i].draw(pos=card_pos, hover=hover)
 
 		# Draw active player text and circle
 		active_player_text = "Player %d"%self.player_turn
@@ -664,15 +668,15 @@ class Field(GameState):
 			if self.is_current_player_active() and self.phase.name == 'Build':
 				if isinstance(self.drag_card, CreatureCard):
 					# TODO: Shouldn't be getting the mouse position in this way. Fetch it in update()
-					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos())
+					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos(), player=self.player_number)
 					if cell != None:
 						lane = cell[0]
 						lane_down_center = self.board.grid.get_cell_pos(cell=(lane, self.board.size[1]-1), align=('left','down'))
 						lane_down_center[0] += c.board_card_size[0]
-						self.drag_card.draw(pos=lane_down_center, location="board_hover")
+						self.drag_card.draw(pos=lane_down_center)
 						drawn_in_board = True
 				elif isinstance(self.drag_card, BuildingCard):
-					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos())
+					cell = self.board.grid.get_cell_at_pos(pos=pg.mouse.get_pos(), player=self.player_number)
 					if cell != None:
 						if self.player_number == 0:
 							pos = cell
@@ -681,10 +685,10 @@ class Field(GameState):
 
 						if self.board.building_cards[pos] == None:
 							cell_top_center = self.board.grid.get_cell_pos(cell, align=('left','top'))
-							self.drag_card.draw(cell_top_center, "board_hover")
+							self.drag_card.draw(pos=cell_top_center)
 							drawn_in_board = True
 
 			if drawn_in_board == False:
 				mouse_coords = pg.mouse.get_pos()
 				pos = (mouse_coords[0] - self.card_grab_point[0], mouse_coords[1] - self.card_grab_point[1])
-				self.drag_card.draw(pos, "hand")
+				self.drag_card.draw(pos=pos)

@@ -9,23 +9,14 @@ import copy
 
 import animation as anim
 
-# class EmptyAnimation:
-# 	def __init__(self, pos):
-# 		self.pos = pos
+from enum import Enum, auto
 
-# 	@property
-# 	def current_pos(self):
-# 		return self.pos
-
-# 	@property
-# 	def finished(self):
-# 		return False
-
-# 	def update(self, dt):
-# 		return self.finished
-
-
-
+class CardLocation(Enum):
+	TheVoid = auto()
+	Hand = auto()
+	Drag = auto()
+	Queue = auto()
+	Board = auto()
 
 class Card:
 	def __init__(self, name, cost, visibility, default_action=None):
@@ -41,6 +32,7 @@ class Card:
 		self.current_action = default_action
 
 		self.dirty = True
+		self.location = CardLocation.TheVoid
 
 		self.current_animation = None
 
@@ -84,6 +76,8 @@ class Card:
 		self.cell = None
 		self.activated = False
 
+		self.location = CardLocation.TheVoid
+
 	def queue(self, board, cell, owner):
 		"""Places the card in the appropriate queue_lane for the given board, cell, and owner"""
 		lane = cell[0]
@@ -100,10 +94,13 @@ class Card:
 		self.queue_lane = lane
 		self.cell = (lane, self.board.get_queue_rank(player=self.owner))
 
+		self.location = CardLocation.Queue
+
 	def unqueue(self):
 		if self.queue_lane is not None:
 			self.board.queued_cards[self.owner][self.queue_lane] = None
-			self.board.field.active_hand.add_card(name=self.name)
+			self.board.field.active_hand.add_card(card=self)
+
 
 	def place_queued(self):
 		if self.queue_lane == None: return
@@ -115,7 +112,6 @@ class Card:
 
 		start_pos = self.board.get_unit_cell_pos(cell=self.cell)
 		target_pos = self.board.get_unit_cell_pos(cell=target_cell)
-		print(start_pos, target_pos)
 		self.current_animation = anim.MoveAnimation(start_pos=start_pos, end_pos=target_pos, frame_duration=30)
 
 		# If the target cell is empty, place this card there; otherwise, do nothing
@@ -125,12 +121,15 @@ class Card:
 			self.queue_lane = None
 			self.activated = True
 
+			self.location = CardLocation.Board
+
 	def place(self, board, cell, owner):
 		self.cell = cell
 		self.board = board
 		self.owner = owner
 
 		self.activated = True
+		self.location = CardLocation.Board
 
 	def act(self):
 		if self.current_action == None: return
@@ -220,24 +219,24 @@ class Card:
 		self.dirty = True
 		self._cost = value
 
-	def move_to_hand(self, hand):
-		if isinstance(self.sub_board, np.ndarray) == False:
-			print('sub_board not set')
-			d.print_callstack()
-			return
+	# def move_to_hand(self, hand):
+	# 	if isinstance(self.sub_board, np.ndarray) == False:
+	# 		print('sub_board not set')
+	# 		d.print_callstack()
+	# 		return
 
-		if self.board == True:
-			# This should always be False, but check just in case
-			if self != self.sub_board[self.cell]:
-				print('something about board/cell state in card is wrong')
-				return
+	# 	if self.board == True:
+	# 		# This should always be False, but check just in case
+	# 		if self != self.sub_board[self.cell]:
+	# 			print('something about board/cell state in card is wrong')
+	# 			return
 
-			self.sub_board[self.cell] = None
-			# These don't really matter atm because hand.add_card() pulls a copy from card pool, but futureproofing
-			self.board = None
-			self.cell = None
+	# 		self.sub_board[self.cell] = None
+	# 		# These don't really matter atm because hand.add_card() pulls a copy from card pool, but futureproofing
+	# 		self.board = None
+	# 		self.cell = None
 
-		hand.add_card(name=self.name)
+	# 	hand.add_card(name=self.name)
 
 	@property
 	def hand_surface(self):
@@ -331,23 +330,42 @@ class Card:
 		self.death_queued = True
 
 	def update(self, dt, mouse_pos):
+		if self.location == CardLocation.Drag:
+			if self.board.grid.rect.collidepoint(mouse_pos):
+				self.cell = self.board.grid.get_cell_at_pos(pos=mouse_pos, player=self.owner)
+			else:
+				self.cell = None
 		if self.current_animation is not None:
 			if self.current_animation.update(dt=dt) is True:
 				self.current_animation = None
 				if self.death_queued is True:
 					self.board.delete_unit_from_board(cell=self.cell, sync=True)
 
-	def draw(self, pos, location, hover=False):
-		if location == 'hand':
+	def draw(self, pos, hover=False):
+		if self.location == CardLocation.Hand:
 			draw.screen.blit(self.hand_surface, pos)
 			if hover:
 				pg.draw.rect(draw.screen, c.gold, (pos, self.hand_surface.get_size()), 3)
-		elif location == 'board' or location == 'board_hover':
-			if self.current_animation is not None:
-				draw.screen.blit(self.board_surface, self.current_animation.current_pos)
+		elif self.location == CardLocation.Board:
+			if self.current_animation is None:
+				if isinstance(self, BuildingCard):
+					draw.screen.blit(self.board_surface, self.board.get_building_cell_pos(cell=self.cell))
+				else:
+					draw.screen.blit(self.board_surface, self.board.get_unit_cell_pos(cell=self.cell))
 			else:
-				draw.screen.blit(self.board_surface, pos)
-		elif location == 'queue':
+				draw.screen.blit(self.board_surface, self.current_animation.current_pos)
+		elif self.location == CardLocation.Drag:
+			if self.cell is None:
+				draw.screen.blit(self.hand_surface, pos)
+			else:
+				if isinstance(self, BuildingCard):
+					draw.screen.blit(self.board_surface, self.board.get_building_cell_pos(cell=self.cell))
+				else:
+					cell_x = self.cell[0]
+					cell_y = self.board.get_queue_rank(player=self.owner)
+
+					draw.screen.blit(self.board_surface, self.board.get_unit_cell_pos(cell=(cell_x,cell_y)))
+		elif self.location == CardLocation.Queue:
 			draw.screen.blit(self.board_surface, pos)
 
 class BuildingCard(Card):
@@ -384,10 +402,12 @@ class BuildingCard(Card):
 		#self.sub_board[cell] = self
 		self.activated = False
 
+		self.location = CardLocation.Queue
+
 	# TODO: Add network sync; the problem is I've been relying on board.place_card, but this doesn't go through that method
-	def complete(self):
-		self.activated = True
-		self.board.refresh_fow()
+	# def complete(self):
+	# 	self.activated = True
+	# 	self.board.refresh_fow()
 
 	def visible_cells(self):
 		if self.activated == False: return [] # Don't show on the map if the building isn't built yet
@@ -540,16 +560,18 @@ class BuilderCard(CreatureCard):
 								base_power=base_power, max_health=max_health,
 								visibility=visibility, health=health)
 
-		self.active_actions.update({'MB': MoveBuildAction(card=self)})
+		self.active_actions.update({'MB': MoveAttackBuildAction(card=self)})
 		self.current_action = 'MB'
 
 		self.base_power = base_power
 		self._health_component = HealthComponent(max_health=max_health, health=health)
 
-	def unqueue(self):
-		if self.queue_lane is not None:
-			self.board.queued_cards[self.owner][self.queue_lane] = None
-			self.board.field.active_hand.add_card(name=self.target_building.name)
+	# def unqueue(self):
+	# 	if self.queue_lane is not None:
+	# 		#self.board.queued_cards[self.owner][self.queue_lane] = None
+	# 		self.board.field.active_hand.add_card(name=self.target_building.name)
+
+	# 		self
 
 	@property
 	def target_building(self):
@@ -583,17 +605,19 @@ class BuilderCard(CreatureCard):
 			self.board = None
 			self.cell = None
 
+			self.location = CardLocation.TheVoid
+
 			# Builder card should just be deleted, and not returned to hand
 
-	def draw(self, pos, location, hover=False):
+	def draw(self, pos, hover=False):
 		# Draw target pending building
-		if location == 'board' or location == 'queue':
+		if self.location == CardLocation.Board or self.location == CardLocation.Queue:
 			building_pos = self.board.grid.get_cell_pos(cell=self.target_cell, align=('left','up'))
 
 			#if self.board.field.player_number == self.owner:
-			self.target_building.draw(pos=building_pos, location='board')
+			self.target_building.draw(pos=building_pos)
 
-		Card.draw(self=self, pos=pos, location=location, hover=hover)
+		Card.draw(self=self, pos=pos, hover=hover)
 
 	def clone(self):
 		return BuilderCard(	name = self.name,

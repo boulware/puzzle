@@ -198,3 +198,43 @@ class ScanAction(Action):
 
 		self.board.reveal_cells(cells=[self.target_cell], player=self.owner)
 		self.scans_this_turn += 1
+
+class MoveAttackBuildAction(Action):
+	def __init__(self, card, target_cell=None, target_building=None):
+		Action.__init__(self=self, card=card)
+
+		self.attack_move_action = AttackMoveAction(card=card)
+		self.build_action = BuildAction(card=card, target_cell=target_cell, target_building=target_building)
+		self.target_cell = target_cell
+		self.target_building = target_building
+
+	@property
+	def target_building(self):
+		return self._target_building
+
+	@target_building.setter
+	def target_building(self, value):
+		self._target_building = value
+		self.build_action.target_building = value
+
+	@property
+	def target_cell(self):
+		return self._target_cell
+
+	@target_cell.setter
+	def target_cell(self, value):
+		self._target_cell = value
+		self.attack_move_action.target_cell = value
+		self.build_action.target_cell = value
+
+	def do(self):
+		if self.card.cell == None: return
+
+		if self.board.building_cards[self.target_cell] is not None:
+			print(f'deleting {self.card.name} from {self.card.cell}')
+			self.board.delete_unit_from_board(cell=self.card.cell, sync=True)
+
+		if self.card.cell == self.target_cell:
+			self.build_action.do()
+		else:
+			self.attack_move_action.do()

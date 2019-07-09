@@ -137,12 +137,19 @@ class Grid:
 	# 	else:
 	# 		return None
 
-	def get_cell_at_pos(self, pos):
+	def get_cell_at_pos(self, pos, player):
 		hit = False
 		x, y = pos
 
-		grid_x = (x - self.rect.x) // self.cell_size[0]
-		grid_y = (y - self.rect.y) // self.cell_size[1]
+		if player == 0:
+			grid_x = (x - self.rect.x) // self.cell_size[0]
+			grid_y = (y - self.rect.y) // self.cell_size[1]
+		elif player == 1:
+			grid_x = (self.dimensions[0]-1) - (x - self.rect.x) // self.cell_size[0]
+			grid_y = (self.dimensions[1]-1) - (y - self.rect.y) // self.cell_size[1]
+		else:
+			grid_x = None
+			grid_y = None
 
 		if grid_x >=0 and grid_x < self.dimensions[0] and grid_y >= 0 and grid_y < self.dimensions[1]:
 			hit = True
@@ -322,7 +329,7 @@ class Board:
 			surface.set_colorkey(c.pink)
 
 		# The cells that are visible by default (closest 2 ranks to your side, as of writing this comment)
-		fow_rank_count = 6
+		fow_rank_count = 3
 		p0_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(self.size[1]-fow_rank_count,self.size[1])]
 		p1_fow_default_visible_cells = [(x,y) for x in range(0,self.size[0]+1) for y in range(0,fow_rank_count)]
 
@@ -350,6 +357,10 @@ class Board:
 	def get_unit_cell_pos(self, cell):
 		topleft = self.grid.get_cell_pos(cell=cell)
 		return (topleft[0] + c.board_card_size[0], topleft[1])
+
+	def get_building_cell_pos(self, cell):
+		topleft = self.grid.get_cell_pos(cell=cell)
+		return topleft
 
 	@property
 	def lane_count(self):
@@ -511,7 +522,6 @@ class Board:
 	def draw(self, screen, player_perspective=0):
 		self.grid.draw(screen=screen, color=c.grey, player_perspective=player_perspective)
 
-		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)
 		if self.selected_cell != None:
 			# Draw the c.green highlight around border of selected cell
 			pg.draw.rect(screen, c.green, self.grid.get_cell_rect(self.selected_cell), 1)
@@ -528,38 +538,10 @@ class Board:
 				if player_perspective == 1:
 					cell_y = self.size[1] - 1 - cell_y
 				card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('left','top'))
-				card_pos[0] += c.board_card_size[0]
+				if isinstance(card, BuildingCard) is False:
+					card_pos[0] += c.board_card_size[0]
 
-				card.draw(pos=card_pos, location='board')
-				# if card.cell in self._fow_visible_cells[player_perspective]:
-				# 	if animation_interp_factor is not None and not isinstance(card, BuildingCard) and card.previous_cell is not None and card.owner == self.field.player_turn:
-				# 		target_cell = card.cell
-				# 		previous_cell = card.previous_cell
+				if card.cell in self._fow_visible_cells[self.field.player_number]:
+					card.draw(pos=card_pos)
 
-				# 		if player_perspective == 1:
-				# 			target_cell[1] = self.size[1] - 1 - target_cell[1]
-				# 			previous_cell[1] = self.size[1] - 1 - previous_cell[1]
-
-				# 		target_pos = self.grid.get_cell_pos(cell=target_cell, align=('left', 'top'))
-				# 		target_pos[0] += c.board_card_size[0]
-				# 		previous_pos = self.grid.get_cell_pos(cell=previous_cell, align=('left', 'top'))
-				# 		previous_pos[0] += c.board_card_size[0]
-
-				# 		t = animation_interp_factor
-				# 		jerk = animation_jerk
-				# 		interpolated_pos = ((1-pow(t,jerk))*previous_pos[0] + pow(t,jerk)*target_pos[0], (1-pow(t,jerk))*previous_pos[1] + pow(t,jerk)*target_pos[1])
-
-				# 		card.draw(interpolated_pos, 'board')
-				# 	else:
-				# 		cell_x, cell_y = card.cell
-				# 		if player_perspective == 1:
-				# 			cell_y = self.size[1] - 1 - cell_y
-				# 		card_pos = self.grid.get_cell_pos((cell_x,cell_y), align=('left','top'))
-				# 		if isinstance(card, BuildingCard):
-				# 			# Align the building cards on the left of the cell...
-				# 			pass
-				# 		else:
-				# 			# ... and the unit cards on the right
-				# 			card_pos[0] += c.board_card_size[0]
-
-				# 		card.draw(card_pos, 'board')
+		screen.blit(self.fow_surfaces[player_perspective], self.grid.origin)

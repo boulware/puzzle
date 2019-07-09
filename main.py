@@ -51,6 +51,13 @@ class CardPool:
         self.cards.append(new_card)
         return {'success': True}
 
+    def card_exists(self, name):
+        for card in self.cards:
+            if card.name == name:
+                return True
+
+        return False
+
     def get_card_by_name(self, name):
         """If the card with the given name is in the pool, returns a clone of it."""
         for card in self.cards:

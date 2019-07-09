@@ -1,9 +1,11 @@
 import debug as d
+from card import CardLocation
 
 class Hand:
-	def __init__(self, field):
+	def __init__(self, field, owner):
 		self.cards = []
 		self.field = field
+		self.owner = owner
 
 	def __iter__(self):
 		return iter(self.cards)
@@ -18,11 +20,11 @@ class Hand:
 	def card_count(self):
 		return len(self.cards)
 
-	def add_card(self, name, count=1):
-		card = self.field.game.card_pool.get_card_by_name(name)
-		if card:
-			for _ in range(count):
-				self.cards.append(self.field.game.card_pool.get_card_by_name(name))
+	def add_card(self, card):
+		if card is not None:
+			card.location = CardLocation.Hand
+			card.owner = self.owner
+			self.cards.append(card)
 		else:
 			d.print_callstack()
 			print("Tried to add non-existent card to hand.")
@@ -35,7 +37,7 @@ class Hand:
 
 	def add_random_cards(self, count=1):
 		for _ in range(count):
-			self.cards.append(self.field.game.card_pool.get_random_card())
+			self.add_card(card=self.field.game.card_pool.get_random_card())
 
 class Deck:
 	def __init__(self, field):

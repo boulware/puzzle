@@ -23,6 +23,21 @@ class Tween:
 	def update(self, dt):
 		self.current_frame += 1
 
+class EmptyAnimation:
+	def __init__(self, pos):
+		self.pos = pos
+
+	@property
+	def current_pos(self):
+		return self.pos
+
+	@property
+	def finished(self):
+		return False
+
+	def update(self, dt):
+		return self.finished
+
 class MoveAnimation:
 	def __init__(self, start_pos, end_pos, frame_duration, jerk=1.0):
 		self.start_pos = start_pos
